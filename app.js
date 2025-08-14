@@ -1,0 +1,738 @@
+let DEBUG = true;
+
+
+
+// ====== Estado y persistencia ======
+const KEY = 'soup_tours';
+const DEFAULT_STATE = {
+  band: { name: 'SOUP', members: [{id:'u1', name:'Ismael', role:'voz/guitarra'}], pin: null },
+  shows: [],
+  moves: []
+};
+let STATE = load();
+let LASTS = [];
+const CURRENT_VERSION = 2;
+let currentTab = 'home';
+let cashFilter = 'all';
+let enteredPin = '';
+let toastTimeout;
+let UI = { cashFilter:{scope:'todos', memberId:null}, search:'' };
+
+// ====== Merge metadata ======
+const META_KEY = 'soup_tours_meta';
+function getDeviceId(){
+  let meta = JSON.parse(localStorage.getItem(META_KEY)||'{}');
+  if(!meta.deviceId){ meta.deviceId = 'dev_' + Math.random().toString(36).slice(2,10); localStorage.setItem(META_KEY, JSON.stringify(meta)); }
+  return meta.deviceId;
+}
+const DEVICE_ID = getDeviceId();
+
+function nowIso(){ return new Date().toISOString(); }
+function stampNew(base){ 
+  return { 
+    ...base, 
+    createdAt: base.createdAt || nowIso(), 
+    updatedAt: nowIso(), 
+    originId: DEVICE_ID, 
+    deletedAt: base.deletedAt || null 
+  };
+}
+function stampUpdate(obj, patch){
+  return { ...obj, ...patch, updatedAt: nowIso(), originId: DEVICE_ID };
+}
+function markDeleted(obj){
+  return { ...obj, deletedAt: nowIso(), updatedAt: nowIso(), originId: DEVICE_ID };
+}
+
+// ====== Selectores de DOM (globales para que las funciones puedan usarlos) ======
+let view, tabs, modal, fab, btnExport, btnImport, btnUndo, btnExportCsv, btnSettings, searchInput, bandNameEl, pinScreen, pinDots, numpad;
+
+// ====== Funciones de Utilidad ======
+const uid = (prefix = '') => prefix + Math.random().toString(36).slice(2,9);
+const strHash = s => s.split('').reduce((a,b)=>(a<<5)-a+b.charCodeAt(0),0);
+const memberName = id => (STATE.band.members.find(m=>m.id===id)||{}).name || '—';
+
+function setSearch(q){ UI.search=(q||'').toLowerCase(); render(); }
+
+function matchesSearch(text){ return !UI.search || (text||'').toLowerCase().includes(UI.search); }
+function hasTag(m){
+  if(!UI.search.startsWith('#')) return true;
+  const tag = UI.search.trim(); return (m.tags||[]).includes(tag);
+}
+
+// ====== Lógica de Estado ======
+function migrate(state){
+  state.version ||= 1;
+  if(state.version < 2){
+    // V2 agrega: category en moves, tags[], currency, fx_rate, receiptDataUrl, templates[], quickActions[]
+    state.moves.forEach(m=>{
+      m.category ||= 'General';
+      m.tags ||= [];
+      m.currency ||= 'ARS';
+      m.fx_rate ||= 1;
+      m.receiptDataUrl ||= null;
+    });
+    state.templates ||= [];
+    state.quickActions ||= [
+      {label:'+ Venta merch $5000', kind:'ingreso', scope:'comun', amount:5000, category:'Merch', note:'Venta mesa'},
+      {label:'+ Nafta $10000', kind:'gasto', scope:'comun', amount:10000, category:'Transporte', note:'Combustible'},
+      {label:'+ Peaje $1500', kind:'gasto', scope:'comun', amount:1500, category:'Peajes', note:'Peaje'}
+    ];
+    state.shows.forEach(s=>{ s.closedAt ||= null; s.requerimientos ||= ''; });
+    state.version = 2;
+  }
+  return state;
+}
+
+function save(){ localStorage.setItem(KEY, JSON.stringify(STATE)); }
+
+function snapshot(){ LASTS.push(JSON.stringify(STATE)); if (LASTS.length>3) LASTS.shift(); }
+
+function load(){
+  if (DEBUG) console.log('load');
+  try {
+    let loadedState = JSON.parse(localStorage.getItem(KEY));
+    if (!loadedState) loadedState = DEFAULT_STATE;
+    return migrate(loadedState);
+  }
+  catch(e) {
+    console.error('[SOUP] Error loading state:', e);
+    alert('Ocurrió un error al cargar los datos. Se reiniciará la aplicación.');
+    return migrate(DEFAULT_STATE); // Ensure DEFAULT_STATE is also migrated
+  }
+}
+
+function mutateState(mutationFn) {
+  if (DEBUG) console.log('mutateState');
+  snapshot();
+  mutationFn();
+  save();
+  render();
+}
+
+function undo() {
+  if (DEBUG) console.log('undo');
+  if(!LASTS.length) return toast('Nada para deshacer.');
+  STATE = JSON.parse(LASTS.pop());
+  save();
+  render();
+  toast('Deshecho.', 'success');
+}
+
+// ====== Lógica de Negocio (Cálculos) ======
+function balances(){
+  if (DEBUG) console.log('balances');
+  const sum = (f)=>STATE.moves.filter(f).reduce((a,m)=>a+m.amount*(m.kind==='ingreso'?1:-1),0);
+  const comun = sum(m=>m.scope==='comun');
+  const per = {}; STATE.band.members.forEach(mm=>{
+    per[mm.id] = sum(m=>m.scope==='personal' && m.memberId===mm.id);
+  });
+  return { comun, per };
+}
+
+function getShowBalance(showId) {
+  if (DEBUG) console.log('getShowBalance', { showId });
+  const showMoves = STATE.moves.filter(m => m.showId === showId);
+  return showMoves.reduce((acc, move) => acc + (move.amount * (move.kind === 'ingreso' ? 1 : -1)), 0);
+}
+
+function amountBase(m){ return m.amount * (m.kind==='ingreso'?1:-1) * (m.fx_rate||1); }
+function totalsByCategory(list){
+  const map = {};
+  list.forEach(m=>{ const k=m.category||'General'; map[k]=(map[k]||0)+amountBase(m); });
+  return map; // {Categoria: netoBase}
+}
+
+// ====== Merge engine ======
+function byId(arr){ return new Map(arr.map(x=>[x.id, x])); }
+function newer(a, b){
+  // devuelve el más nuevo por updatedAt (ISO); si empatan, preferí el local (a)
+  if(!a) return b;
+  if(!b) return a;
+  return (a.updatedAt||'') >= (b.updatedAt||'') ? a : b;
+}
+function mergeArrays(localArr, incomingArr){
+  const res = new Map();
+  const all = [...localArr, ...incomingArr];
+  for(const item of all){
+    const prev = res.get(item.id);
+    res.set(item.id, newer(prev, item));
+  }
+  return Array.from(res.values());
+}
+
+function mergeState(local, incoming){
+  // NO toques campos sensibles como PIN si no querés
+  const band = {
+    ...local.band,
+    name: newer({updatedAt: local.updatedAt}, {updatedAt: incoming.updatedAt}) === local ? local.band.name : (incoming.band?.name || local.band.name),
+    pin: local.band.pin // mantené el PIN local
+  };
+
+  return {
+    band: {
+      ...band,
+      members: mergeArrays(local.band.members||[], incoming.band?.members||[])
+    },
+    shows: mergeArrays(local.shows||[], incoming.shows||[]),
+    moves: mergeArrays(local.moves||[], incoming.moves||[]),
+    // marcas de sincronización (opcionales)
+    lastMergedAt: nowIso(),
+    updatedAt: nowIso()
+  };
+}
+
+function alive(arr) { return arr.filter(x=>!x.deletedAt); }
+window.alive = alive;
+
+// ====== Acciones ======
+function removeMember(id){
+  const i = STATE.band.members.findIndex(m=>m.id===id);
+  if(i===-1) return;
+  const hasMoves = STATE.moves.some(m=>m.memberId===id);
+  if (hasMoves) return toast('No se puede borrar: tiene movimientos personales.');
+  if(!confirm('¿Seguro?')) return;
+  // en vez de borrar duro, marcá como eliminado
+  mutateState(()=> STATE.band.members[i] = markDeleted(STATE.band.members[i]));
+}
+function addMember(name, role){ if (DEBUG) console.log('addMember', { name, role }); mutateState(() => STATE.band.members.push(stampNew({id:uid(), name, role}))); }
+function addShow(data){ if (DEBUG) console.log('addShow', { data }); mutateState(() => STATE.shows.push(stampNew({id:uid(), state:'pendiente', ...data}))); }
+function updateShow(id, data){ if (DEBUG) console.log('updateShow', { id, data }); mutateState(() => { const index = STATE.shows.findIndex(s=>s.id===id); if(index!==-1) STATE.shows[index] = {...STATE.shows[index], ...data}; }); }
+function setState(id, newState){ 
+  if (DEBUG) console.log('setState', { id, newState }); 
+  if (newState === 'realizado' && !confirm('¿Marcar show como realizado?')) return;
+  mutateState(() => { const s=STATE.shows.find(s=>s.id===id); if(s && s.state!=='realizado') s.state=newState; }); 
+}
+function cancelShow(id){
+  const s = STATE.shows.find(s=>s.id===id);
+  if (!s) return;
+  if (s.state === 'realizado') return toast('No se puede cancelar un show realizado.');
+  if (!confirm('¿Estás seguro de que quieres cancelar este show?')) return; // Added confirmation
+  const motivo = prompt('Motivo de cancelación');
+  if(!motivo) return;
+  mutateState(()=>{ s.state='cancelado'; s.cancelReason=motivo; });
+}
+
+function closeShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Cerrar show?')) return; mutateState(()=>{ s.closedAt = Date.now(); }); }
+function reopenShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Reabrir show?')) return; mutateState(()=>{ s.closedAt = null; }); }
+function isClosed(s){ return !!s.closedAt; }
+
+function addMove(kind, scope, amount, note, memberId, showId, extra={}){
+  if(showId){ const s=STATE.shows.find(x=>x.id===showId); if(s && isClosed(s)) return toast('Show cerrado. Reabrí para cargar.'); }
+  if(scope==='personal' && !memberId) return toast('Elegí integrante');
+  const base = {id:uid(), ts:Date.now(), kind, scope, memberId, amount:Number(amount), note, showId};
+  const withExtra = Object.assign(base, {
+    category: 'General', tags: [], currency: 'ARS', fx_rate: 1, receiptDataUrl: null
+  }, extra);
+  mutateState(() => STATE.moves.unshift(withExtra));
+}
+function updateMove(id, data){ if (DEBUG) console.log('updateMove', { id, data }); mutateState(() => { const index = STATE.moves.findIndex(m=>m.id===id); if(index!==-1) STATE.moves[index] = {...STATE.moves[index], ...data}; }); }
+
+function addTemplate(t){ t.id = uid(); STATE.templates.push(t); save(); render(); }
+function useTemplate(tid){
+  const t = STATE.templates.find(x=>x.id===tid); if(!t) return;
+  openMoveForm();
+  // precarga campos
+  setTimeout(()=>{
+    document.getElementById('f-kind').value = t.kind;
+    document.getElementById('f-scope').value = t.scope; document.getElementById('f-scope').onchange();
+    document.getElementById('f-amount').value = t.amount;
+    document.getElementById('f-note').value = t.note||'';
+    document.getElementById('f-cat').value = t.category||'General';
+    document.getElementById('f-tags').value = (t.tags||[]).join(' ');
+    document.getElementById('f-cur').value = t.currency||'ARS';
+    document.getElementById('f-fx').value = t.fx_rate||1;
+  },0);
+}
+
+// ====== Helpers UI ======
+function open(html){ if (DEBUG) console.log('open'); modal.innerHTML = html; modal.showModal(); }
+function close(){ if (DEBUG) console.log('close'); modal.close(); }
+function input(name, attrs='') { return `<div class="field"><label>${name}<input ${attrs}></label></div>` }
+function toast(msg, level='error') {
+  if (DEBUG) console.log('toast', { msg, level });
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = level === 'error' ? 'red' : 'darkgreen';
+  el.classList.add('show');
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function log(evt, payload){ if(!DEBUG) return; console.groupCollapsed(`[SOUP] ${evt} @ ${new Date().toLocaleTimeString()}`); console.log(payload||'(sin payload)'); console.groupEnd(); }
+
+snapshot = (function(orig){ return function(){ if(DEBUG) log('snapshot(before)', STATE); orig.apply(this, arguments); if(DEBUG) log('snapshot(after)', {depth:LASTS?.length||0}); }; })(snapshot);
+
+const _save = save; save = function(){ if(DEBUG) log('save', STATE); _save(); };
+
+// ====== Formularios y Menús ======
+function openSettings() {
+  if (DEBUG) console.log('openSettings');
+  const hasPin = !!STATE.band.pin;
+  open(`<form method="dialog" class="card">
+      <h3>Ajustes</h3>
+      <ul class="menu">
+        <li><button value="pin">${hasPin ? 'Cambiar' : 'Crear'} PIN</button></li>
+        ${hasPin ? '<li><button value="remove_pin">Quitar PIN</button></li>' : ''}
+        <li><button value="run_tests">Correr Tests</button></li>
+      </ul>
+    </form>`);
+  modal.addEventListener('close', () => {
+    if (modal.returnValue === 'pin') {
+      const newPin = prompt('Ingresá un nuevo PIN de 4 dígitos');
+      if (newPin && newPin.length === 4 && !isNaN(newPin)) {
+        mutateState(() => STATE.band.pin = strHash(newPin));
+        toast('PIN guardado.', 'success');
+      } else if (newPin) {
+        toast('El PIN debe ser de 4 números.');
+      }
+    } else if (modal.returnValue === 'remove_pin') {
+      mutateState(() => STATE.band.pin = null);
+      toast('PIN eliminado.', 'success');
+    } else if (modal.returnValue === 'run_tests') {
+      runTests();
+    }
+  }, { once: true });
+}
+
+function openMenu(type, id) {
+  if (DEBUG) console.log('openMenu', { type, id });
+  const isShow = type === 'show';
+  open(`<form method="dialog" class="card">
+      <ul class="menu">
+        <li><button value="edit">Editar</button></li>
+        ${isShow ? '<li><button value="duplicate">Duplicar</button></li>' : ''}
+        <li><button value="delete">Eliminar</button></li>
+      </ul>
+    </form>`);
+  modal.addEventListener('close', () => {
+    if (modal.returnValue === 'delete') deleteItem(type, id);
+    else if (modal.returnValue === 'edit') { if (isShow) openShowForm(id); else openMoveForm(id); }
+    else if (modal.returnValue === 'duplicate' && isShow) openShowForm(id, true);
+  }, { once: true });
+}
+
+function deleteItem(type, id) {
+  if (DEBUG) console.log('deleteItem', { type, id });
+  if (!confirm('¿Estás seguro de que querés eliminar esto?')) return;
+  if (type === 'show') deleteShow(id);
+  else if (type === 'move') deleteMove(id);
+  toast('Elemento eliminado.', 'success');
+}
+
+function deleteShow(id){
+  mutateState(()=>{
+    const i = STATE.shows.findIndex(s=>s.id===id);
+    if(i!==-1) STATE.shows[i] = markDeleted(STATE.shows[i]);
+  });
+}
+function deleteMove(id){
+  mutateState(()=>{
+    const i = STATE.moves.findIndex(m=>m.id===id);
+    if(i!==-1) STATE.moves[i] = markDeleted(STATE.moves[i]);
+  });
+}
+
+function openMemberForm() {
+  if (DEBUG) console.log('openMemberForm');
+  open(`<form method="dialog" class="card">
+      <h3>Nuevo integrante</h3>
+      ${input('Nombre','id="f-name" required')}
+      ${input('Rol','id="f-role"')}
+      <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
+    </form>`);
+  modal.addEventListener('close',()=>{ 
+    if(modal.returnValue !== 'default') return;
+    const nameInput = document.getElementById('f-name');
+    if (!nameInput.value) { nameInput.classList.add('invalid'); return toast('El nombre es obligatorio.'); }
+    addMember(nameInput.value, document.getElementById('f-role').value);
+  }, {once:true});
+}
+
+function openShowForm(id, duplicate = false) {
+  if (DEBUG) console.log('openShowForm', { id, duplicate });
+  const show = id ? STATE.shows.find(s => s.id === id) : {};
+  const title = id ? (duplicate ? 'Duplicar show' : 'Editar show') : 'Nuevo show';
+  open(`<form method="dialog" class="card">
+      <h3>${title}</h3>
+      ${input('Fecha',`id="f-date" type="date" required value="${show?.date || ''}"`)}
+      ${input('Ciudad',`id="f-city" required value="${show?.city || ''}"`)}
+      ${input('Venue',`id="f-venue" value="${show?.venue || ''}"`)}
+      ${input('Cache',`id="f-cache" type="number" inputmode="numeric" min="0" value="${show?.cache || 0}"`)}
+      <div class="field"><label>Requerimientos (Rider)<textarea id="f-rider">${show?.requerimientos || ''}</textarea></label></div>
+      <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
+    </form>`);
+  modal.addEventListener('close',()=> {
+    if(modal.returnValue !== 'default') return;
+    const dateInput = document.getElementById('f-date');
+    const cityInput = document.getElementById('f-city');
+    let valid = true;
+    if (!dateInput.value) { dateInput.classList.add('invalid'); valid = false; }
+    if (!cityInput.value) { cityInput.classList.add('invalid'); valid = false; }
+    if (!valid) return toast('Completá los campos obligatorios.');
+    const data = {
+      date: dateInput.value,
+      city: cityInput.value,
+      venue: document.getElementById('f-venue').value,
+      cache: Number(document.getElementById('f-cache').value||0),
+      requerimientos: document.getElementById('f-rider').value
+    };
+    if (id && !duplicate) updateShow(id, data); else addShow(data);
+  }, {once:true});
+}
+
+function openMoveForm(id){
+  if (DEBUG) console.log('openMoveForm', { id });
+  const move = id ? STATE.moves.find(m => m.id === id) : {};
+  const memberOpts = STATE.band.members.map(m=>`<option value="${m.id}" ${move?.memberId === m.id ? 'selected' : ''}>${m.name}</option>`).join('');
+  const showOpts = ['<option value="">(ninguno)</option>'].concat(STATE.shows.map(s=>`<option value="${s.id}" ${move?.showId === s.id ? 'selected' : ''}>${s.date} ${s.city}</option>`)).join('');
+  open(`<form method="dialog" class="card">
+      <h3>${id ? 'Editar' : 'Nuevo'} movimiento</h3>
+      <div class="field"><label>Tipo<select id="f-kind"><option value="ingreso" ${move?.kind === 'ingreso' ? 'selected' : ''}>Ingreso</option><option value="gasto" ${move?.kind === 'gasto' ? 'selected' : ''}>Gasto</option></select></label></div>
+      <div class="field"><label>Alcance<select id="f-scope"><option value="comun" ${move?.scope === 'comun' ? 'selected' : ''}>Común</option><option value="personal" ${move?.scope === 'personal' ? 'selected' : ''}>Personal</option></select></label></div>
+      <div class="field" id="f-member-wrap" style="display:none"><label>Integrante<select id="f-member">${memberOpts}</select></label></div>
+      ${input('Monto',`id="f-amount" type="number" inputmode="numeric" min="1" required value="${move?.amount || ''}"`)}
+      <div class="chip-bar">${[2000, 5000, 10000].map(p => `<button type="button" class="chip" onclick="document.getElementById('f-amount').value = ${p}">${p/1000}k</button>`).join('')}</div>
+      <div class="field"><label>Categoría
+        <input id="f-cat" list="cat-list" placeholder="General" value="${move?.category || 'General'}" />
+      </label></div>
+      <datalist id="cat-list">
+        <option>Merch</option><option>Transporte</option><option>Comida</option>
+        <option>Alojamiento</option><option>Peajes</option><option>Alquiler equipo</option>
+      </datalist>
+      <div class="field"><label>Tags (usa #)
+        <input id="f-tags" placeholder="#peaje #ruta" value="${(move?.tags || []).join(' ')}" />
+      </label></div>
+      <div class="row" style="gap:.5rem">
+        <div class="field" style="flex:1"><label>Moneda
+          <input id="f-cur" value="${move?.currency || 'ARS'}" maxlength="3" />
+        </label></div>
+        <div class="field" style="flex:1"><label>FX (a base)
+          <input id="f-fx" type="number" step="0.0001" value="${move?.fx_rate || 1}" />
+        </label></div>
+      </div>
+      ${input('Nota',`id="f-note" value="${move?.note || ''}"`)}
+      <div class="field"><label>Show<select id="f-show">${showOpts}</select></label></div>
+      <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
+    </form>`);
+  const scopeSel = document.getElementById('f-scope');
+  const wrap = document.getElementById('f-member-wrap');
+  const updateMemberVisibility = () => wrap.style.display = scopeSel.value === 'personal' ? 'block' : 'none';
+  scopeSel.onchange = updateMemberVisibility;
+  updateMemberVisibility();
+  modal.addEventListener('close',()=> {
+    if(modal.returnValue !== 'default') return;
+    const amountInput = document.getElementById('f-amount');
+    const amount = Number(amountInput.value);
+    if (amount <= 0) { amountInput.classList.add('invalid'); return toast('El monto debe ser mayor a cero.'); }
+    const scope = document.getElementById('f-scope').value;
+    const memberId = scope==='personal' ? document.getElementById('f-member').value : null;
+    if (scope === 'personal' && !memberId) return toast('Elegí un integrante para el movimiento personal.');
+    const data = { kind: document.getElementById('f-kind').value, scope, amount, note: document.getElementById('f-note').value, memberId, showId: document.getElementById('f-show').value || null };
+    const category = document.getElementById('f-cat').value || 'General';
+    const tags = (document.getElementById('f-tags').value||'')
+                  .split(/\s+/).filter(Boolean).map(t=>t.startsWith('#')?t:`#${t}`);
+    const currency = (document.getElementById('f-cur').value||'ARS').toUpperCase();
+    const fx_rate = Number(document.getElementById('f-fx').value||1);
+    const extra = {category, tags, currency, fx_rate};
+
+    if (id) updateMove(id, { ...data, ...extra });
+    else addMove(data.kind, data.scope, data.amount, data.note, data.memberId, data.showId, extra);
+  }, {once:true});
+}
+
+function setCashFilter(filter) {
+  if (DEBUG) console.log('setCashFilter', { filter });
+  cashFilter = filter;
+  render();
+}
+
+// ====== Renderizado ======
+function render(){
+  if (DEBUG) console.log('render', { currentTab, cashFilter, search: UI.search });
+  bandNameEl.textContent = STATE.band.name || 'SOUP Tours';
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentTab));
+  if(currentTab==='home') return renderHome();
+  if(currentTab==='shows') return renderShows();
+  renderCash();
+}
+
+function renderHome(){
+  if (DEBUG) console.log('renderHome');
+  const {comun, per} = balances();
+  const quick = (STATE.quickActions||[]).slice(0,3).map(q=>
+    `<button class="btn" onclick="quickAction('${q.label}')">${q.label}</button>`
+  ).join(' ');
+  const chips = STATE.band.members.map(m=>`<span class="badge">${m.name}: ${(per[m.id]||0).toLocaleString()}</span>`).join(' ');
+  const upcoming = alive(STATE.shows)
+    .filter(s => matchesSearch(s.city) || matchesSearch(s.venue))
+    .sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5)
+    .map(s=>`<div class="row"><div>${dayjs(s.date).format('DD/MM/YY')} • ${s.city} • ${s.venue||''}</div><span class="badge ${s.state}">${s.state}</span></div>`).join('');
+  view.innerHTML = `
+    <section class="card">${quick}</section>
+    <section class="card"><div class="row"><div>Fondo Común</div><div class="amount">${comun.toLocaleString()}</div></div><div>${chips}</div></section>
+    <section class="card"><h3>Próximos shows</h3><div class="list">${upcoming||'<em>Sin shows</em>'}</div></section>
+    <section class="card"><h3>Miembros</h3>
+      <div class="list">${alive(STATE.band.members).map(m=>`<div class="row"><div>${m.name} • ${m.role||''}</div><button class="ghost" onclick="removeMember('${m.id}')">Quitar</button></div>`).join('')}</div>
+      <button class="btn" onclick="openMemberForm()">+ Integrante</button>
+    </section>`;
+}
+function quickAction(label){
+  const q = STATE.quickActions.find(x=>x.label===label); if(!q) return;
+  addMove(q.kind, q.scope, q.amount, q.note||'', null, null, q);
+}
+
+function renderShows(){
+  if (DEBUG) console.log('renderShows');
+  const shows = alive(STATE.shows)
+    .filter(s => matchesSearch(s.city) || matchesSearch(s.venue))
+    .sort((a,b) => dayjs(a.date).isBefore(dayjs(b.date)) ? -1 : 1);
+  const rows = shows.map(s=>`
+    <div class="card">
+      <div class="row"><div><strong>${dayjs(s.date).format('DD/MM/YY')}</strong> • ${s.city} • ${s.venue||''}</div><div class="row"><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${s.state}</span><button class="menu-btn" onclick="openMenu('show', '${s.id}')">⋮</button></div></div>
+      <div class="row">
+        <div>Cache: ${(s.cache||0).toLocaleString()}</div>
+        <div>Movs: ${getShowBalance(s.id).toLocaleString()}</div>
+        <div class="row" style="gap:.5rem">
+          <button class="ghost" onclick="setState('${s.id}','confirmado')">Confirmar</button>
+          <button class="ghost" onclick="setState('${s.id}','realizado')">Realizado</button>
+          <button class="ghost" onclick="cancelShow('${s.id}')">Cancelar</button>
+          <button class="ghost" onclick="closeShow('${s.id}')" ${isClosed(s)?'disabled':''}>Cerrar</button>
+          <button class="ghost" onclick="reopenShow('${s.id}')" ${!isClosed(s)?'disabled':''}>Reabrir</button>
+        </div>
+      </div>
+    </div>`).join('');
+  view.innerHTML = `<button class="btn" onclick="openShowForm()">+ Show</button>${rows || '<p class="card">Sin shows</p>'}`;
+}
+
+function renderCash(){
+  if (DEBUG) console.log('renderCash');
+  const getFilterClass = f => f === cashFilter ? 'chip active' : 'chip';
+  const memberChips = STATE.band.members.map(m => `<button class="${getFilterClass(m.id)}" onclick="setCashFilter('${m.id}')">${m.name}</button>`).join('');
+  const chips = `<div class="chip-bar">
+      <button class="${getFilterClass('all')}" onclick="setCashFilter('all')">Todos</button>
+      <button class="${getFilterClass('comun')}" onclick="setCashFilter('comun')">Común</button>
+      <button class="${getFilterClass('personal')}" onclick="setCashFilter('personal')">Personal</button>
+      ${memberChips}
+    </div>`;
+  let filteredMoves = alive(STATE.moves);
+  if (cashFilter === 'comun') filteredMoves = filteredMoves.filter(m => m.scope === 'comun');
+  else if (cashFilter === 'personal') filteredMoves = filteredMoves.filter(m => m.scope === 'personal');
+  else if (cashFilter !== 'all') filteredMoves = filteredMoves.filter(m => m.memberId === cashFilter);
+  if (UI.search) {
+    filteredMoves = filteredMoves.filter(m => {
+      if (UI.search.startsWith('#')) {
+        return hasTag(m);
+      }
+      const show = m.showId ? STATE.shows.find(s=>s.id===m.showId) : null;
+      const hay = [
+        m.note || '',
+        show?.city || '',
+        show?.venue || ''
+      ].join(' ').toLowerCase();
+      return hay.includes(UI.search);
+    });
+  }
+  const ingresos = filteredMoves.filter(m=>m.kind==='ingreso').reduce((sum, m) => sum + m.amount, 0);
+  const gastos = filteredMoves.filter(m=>m.kind==='gasto').reduce((sum, m) => sum + m.amount, 0);
+  const net = ingresos - gastos;
+  const totals = `<div class="totals">
+      <div><div class="label">Ingresos</div><div class="amount-lg move-ingreso">${ingresos.toLocaleString()}</div></div>
+      <div><div class="label">Gastos</div><div class="amount-lg move-gasto">${gastos.toLocaleString()}</div></div>
+      <div><div class="label">Neto</div><div class="amount-lg">${net.toLocaleString()}</div></div>
+    </div>`;
+  const rows = filteredMoves.map(m => `
+    <div class="card move-${m.kind}">
+      <div class="row">
+        <div>
+          <span class="amount-lg">${m.kind==='ingreso'?'+':'-'} ${m.amount.toLocaleString()} ${m.currency}</span><br>
+          <small class="muted">${new Date(m.ts).toLocaleDateString('es-ES', {year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}</small>
+        </div>
+        <div>
+          ${m.scope}${m.memberId?` (${memberName(m.memberId)})`:''} • ${m.note||''}<br>
+          <small class="muted">${m.showId?STATE.shows.find(s=>s.id===m.showId)?.city:''}</small>
+        </div>
+        <button class="menu-btn" onclick="openMenu('move', '${m.id}')">⋮</button>
+      </div>
+    </div>
+  `).join('');
+  view.innerHTML = `<button class="btn" onclick="openMoveForm()">+ Movimiento</button>${chips}${totals}<div class="card list">${rows||'<em>Sin movimientos para este filtro</em>'}</div>`;
+}
+
+// ====== Clock ======
+let clockInterval;
+function updateClock() {
+  const clockEl = document.getElementById('clock');
+  if (!clockEl) return;
+  clockEl.textContent = new Date().toLocaleTimeString('es-ES', {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+// ====== Lógica de PIN ======
+function numpadClick(val) {
+  if (DEBUG) console.log('numpadClick', { val });
+  if (val === 'del') enteredPin = enteredPin.slice(0, -1);
+  else if (enteredPin.length < 4) enteredPin += val;
+  
+  for (let i = 0; i < 4; i++) { pinDots.children[i].classList.toggle('filled', i < enteredPin.length); }
+  
+  if (enteredPin.length === 4) {
+    setTimeout(() => {
+      if (strHash(enteredPin) === STATE.band.pin) {
+        pinScreen.style.display = 'none';
+      } else {
+        toast('PIN incorrecto');
+        enteredPin = '';
+        for (let i = 0; i < 4; i++) { pinDots.children[i].classList.remove('filled'); }
+      }
+    }, 100);
+  }
+}
+
+function checkPin() {
+  if (DEBUG) console.log('checkPin');
+  if (!STATE.band.pin) return;
+  pinScreen.style.display = 'flex';
+  const buttons = ['1','2','3','4','5','6','7','8','9','','0','del'];
+  numpad.innerHTML = buttons.map(b => b ? `<button type="button" onclick="numpadClick('${b}')">${b === 'del' ? '⌫' : b}</button>` : '<div></div>').join('');
+}
+
+function exportCSV(){
+  try {
+    const header = 'fecha_iso,tipo,scope,integrante,monto,moneda,fx,nota,categoria,tags,show';
+    const rows = STATE.moves.map(m=>{
+      const iso = new Date(m.ts||Date.now()).toISOString();
+      const name = m.memberId ? memberName(m.memberId) : '';
+      const nota = (m.note||'').replace(/"/g,'""');
+      return `${iso},${m.kind},${m.scope},${name},${m.amount},${m.currency||'ARS'},${m.fx_rate||1},"${nota}","${m.category||'General'}","${(m.tags||[]).join(' ')}",${m.showId||''}`;
+    });
+    const blob = new Blob([ ['\uFEFF', header, ...rows].join('\n') ], {type:'text/csv;charset=utf-8'});
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `soup_tours_moves.csv`});
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('CSV exportado', 'success'); // Add toast for success
+  } catch(e) {
+    console.error('[SOUP] Error exporting CSV:', e);
+    alert('Ocurrió un error al exportar el CSV. Revisá la consola.');
+  }
+}
+
+function liquidationCSV(){
+  try {
+    const members = STATE.band.members;
+    const comunes = STATE.moves.filter(m=>m.scope==='comun');
+    const personales = STATE.moves.filter(m=>m.scope==='personal');
+    const sum = arr => arr.reduce((a,m)=> a + (m.kind==='ingreso'? m.amount : -m.amount)*(m.fx_rate||1), 0);
+    const totalGastoComun = sum(comunes.filter(m=>m.kind==='gasto'));
+    const prorrateo = totalGastoComun / Math.max(1, members.length);
+    const rows = [['integrante','aportes_personales','gastos_personales','parte_gastos_comunes','saldo_final']];
+    members.forEach(mem=>{
+      const ap = sum(personales.filter(m=>m.memberId===mem.id && m.kind==='ingreso'));
+      const ga = sum(personales.filter(m=>m.memberId===mem.id && m.kind==='gasto'));
+      const saldo = ap - ga - prorrateo;
+      rows.push([mem.name, ap, ga, prorrateo, saldo]);
+    });
+    const csv = rows.map(r=>r.join(',')).join('\n');
+    const a = Object.assign(document.createElement('a'), {href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})), download:'liquidacion.csv'});
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('Liquidación exportada', 'success'); // Add toast for success
+  } catch(e) {
+    console.error('[SOUP] Error exporting liquidation CSV:', e);
+    alert('Ocurrió un error al exportar la liquidación. Revisá la consola.');
+  }
+}
+
+function isValidState(obj){
+  return obj && obj.band && Array.isArray(obj.band.members)
+      && Array.isArray(obj.shows) && Array.isArray(obj.moves);
+}
+
+function assertEq(a,b,msg){ if(a!==b){ console.error('ASSERT FAIL:', msg, {a,b}); throw new Error(msg); } }
+function runTests(){
+  const st = JSON.parse(JSON.stringify(STATE));
+  try{
+    DEBUG=true; console.group('[TEST]');
+    const before = STATE.moves.length;
+    addMove('ingreso','comun',1000,'test',null,null,{category:'Merch',currency:'ARS',fx_rate:1});
+    assertEq(STATE.moves.length, before+1, 'addMove should push');
+    const id = STATE.moves[0].id; updateMove ? updateMove(id,{amount:2000}) : 0;
+    assertEq(STATE.moves[0].amount, 2000, 'updateMove should patch');
+    const t = totalsByCategory(STATE.moves.slice(0,1));
+    assertEq(!!t['Merch'], true, 'totalsByCategory returns key');
+    console.log('OK');
+  } finally {
+    STATE = st; save(); console.groupEnd(); render();
+  }
+}
+
+// ====== Inicialización ======
+window.addEventListener('DOMContentLoaded', () => {
+  if (DEBUG) console.log('DOMContentLoaded');
+
+  // Asignar elementos del DOM
+  view = document.getElementById('view');
+  tabs = document.querySelectorAll('.tabs>button');
+  modal = document.getElementById('modal');
+  fab = document.getElementById('fab');
+  btnExport = document.getElementById('btn-export');
+  btnImport = document.getElementById('input-import');
+  btnUndo = document.getElementById('btn-undo');
+  btnCsv = document.getElementById('btn-csv');
+  btnExpLiq = document.getElementById('btn-exp-liq');
+  btnSettings = document.getElementById('btn-settings');
+  bandNameEl = document.getElementById('band-name');
+  pinScreen = document.getElementById('pin-screen');
+  pinDots = document.getElementById('pin-dots');
+  numpad = document.getElementById('numpad');
+
+  // Asignar Event Listeners
+  tabs.forEach(b=>b.addEventListener('click',()=>{
+    currentTab=b.dataset.tab;
+    render(); 
+  }));
+  fab.onclick = ()=>{
+    if(currentTab==='shows') openShowForm(); else openMoveForm(); 
+  };
+  btnExport.onclick = ()=>{
+    const blob = new Blob([JSON.stringify(STATE,null,2)], {type:'application/json'});
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `soup_tours_${new Date().toISOString().slice(0,10)}.json`});
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+  btnImport.onchange = (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const incoming = JSON.parse(reader.result);
+        if(!incoming || !incoming.band || !Array.isArray(incoming.moves)) return toast('Backup inválido');
+
+        // Migrate incoming state to current version
+        const migratedIncoming = migrate(incoming);
+
+        const choice = prompt('Escribí:\nR = Reemplazar todo\nM = Fusionar (merge)');
+        if(!choice) return;
+
+        if(choice.toUpperCase()==='R'){
+          mutateState(()=>{ STATE = migratedIncoming; });
+          toast('Estado reemplazado.', 'success');
+        } else if(choice.toUpperCase()==='M'){
+          const merged = mergeState(STATE, migratedIncoming);
+          mutateState(()=>{ STATE = merged; });
+          toast('Estados fusionados.', 'success');
+        } else {
+          toast('Opción cancelada.');
+        }
+      }catch(err){ console.error('[SOUP] Error importing state:', err); alert('JSON inválido. Revisá la consola.'); }
+    };
+    reader.readAsText(file);
+  };
+  btnUndo.onclick = undo;
+  btnSettings.onclick = openSettings;
+
+  // Renderizado Inicial
+  render();
+  checkPin();
+  
+  // Iniciar Reloj
+  if(clockInterval) clearInterval(clockInterval);
+  clockInterval = setInterval(updateClock, 1000);
+  updateClock();
+});

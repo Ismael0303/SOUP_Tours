@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SOUP Tours</title>
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css" />
+  
+  <link rel="manifest" href="manifest.json" />
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script>
+    // Only basic dayjs initialization
+  </script>
+  
+  
+  
+  <script type="module">
+    // Import lit-html functions and make them globally available
+    import { html, render } from 'https://cdn.jsdelivr.net/npm/lit-html@2/lit-html.js';
+    window.lit = { html, render };
+  </script>
+  <script>
+  if('serviceWorker' in navigator){ navigator.serviceWorker.register('service-worker.js'); }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+  <h1 id="band-name">SOUP Tours</h1>
+  <div id="clock" class="clock"></div>
+  <input id="q" placeholder="Buscar…" oninput="setSearch(this.value)" />
+  <button id="btn-csv" class="ghost" onclick="exportCSV()">CSV</button>
+  <button id="btn-undo" class="ghost" onclick="undo()">Deshacer</button>
+  <button id="btn-exp-liq" class="ghost" onclick="liquidationCSV()">Liquidación</button>
+  <button id="btn-export" class="ghost">Exportar</button>
+  <label class="ghost file">Importar <input id="input-import" type="file" accept="application/json" hidden></label>
+  <button id="btn-settings" class="ghost" onclick="openSettings()">⚙️</button>
+</header>
+
+  <main id="view"></main>
+
+  <button id="fab" class="fab" aria-label="Agregar">＋</button>
+
+  <nav class="tabs">
+    <button data-tab="home" class="active">Inicio</button>
+    <button data-tab="shows">Shows</button>
+    <button data-tab="cash">Caja</button>
+  </nav>
+
+  <dialog id="modal"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="pin-screen" style="display: none;">
+    <h2>Ingresar PIN</h2>
+    <div class="pin-dots" id="pin-dots"><div></div><div></div><div></div><div></div></div>
+    <div class="numpad" id="numpad"></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="tests.js"></script>
+</body>
+</html>
