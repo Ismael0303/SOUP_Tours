@@ -306,7 +306,7 @@ function openSettings() {
         <li><button value="run_tests">Correr Tests</button></li>
         <li><button value="run_hotfix_tests">Correr Tests de Hotfix</button></li>
       </ul>
-    </form>);
+    </form>`);
   modal.addEventListener('close', () => {
     if (modal.returnValue === 'pin') {
       const newPin = prompt('Ingresá un nuevo PIN de 4 dígitos');
@@ -581,7 +581,7 @@ function renderCash(){
           <small class="muted">${new Date(m.ts).toLocaleDateString('es-ES', {year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}</small>
         </div>
         <div>
-          ${m.scope}${m.memberId?` (${memberName(m.memberId)})`:''} • ${m.note||''}<br>
+          ${m.scope}${m.memberId?` (${memberName(m.memberId)})`:''} • ${m.note||''}
           <small class="muted">${m.showId?STATE.shows.find(s=>s.id===m.showId)?.city:''}</small>
         </div>
         <button class="menu-btn" onclick="openMenu('move', '${m.id}')">⋮</button>
@@ -637,10 +637,11 @@ function exportCSV(){
       const nota = (m.note||'').replace(/"/g,'""');
       return `${iso},${m.kind},${m.scope},${name},${m.amount},${m.currency||'ARS'},${m.fx_rate||1},"${nota}","${m.category||'General'}","${(m.tags||[]).join(' ')}",${m.showId||''}`;
     });
-    const blob = new Blob([ ['\uFEFF', header, ...rows].join('\n') ], {type:'text/csv;charset=utf-8'});
+    const blob = new Blob([ ['﻿', header, ...rows].join('
+') ], {type:'text/csv;charset=utf-8'});
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `soup_tours_moves.csv`});
     a.click(); URL.revokeObjectURL(a.href);
-    toast('CSV exportado', 'success'); // Add toast for success
+    toast('CSV exportado.', 'success'); // Add toast for success
   } catch(e) {
     console.error('[SOUP] Error exporting CSV:', e);
     alert('Ocurrió un error al exportar el CSV. Revisá la consola.');
@@ -662,10 +663,11 @@ function liquidationCSV(){
       const saldo = ap - ga - prorrateo;
       rows.push([mem.name, ap, ga, prorrateo, saldo]);
     });
-    const csv = rows.map(r=>r.join(',')).join('\n');
+    const csv = rows.map(r=>r.join(',')).join('
+');
     const a = Object.assign(document.createElement('a'), {href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})), download:'liquidacion.csv'});
     a.click(); URL.revokeObjectURL(a.href);
-    toast('Liquidación exportada', 'success'); // Add toast for success
+    toast('Liquidación exportada.', 'success'); // Add toast for success
   } catch(e) {
     console.error('[SOUP] Error exporting liquidation CSV:', e);
     alert('Ocurrió un error al exportar la liquidación. Revisá la consola.');
@@ -716,7 +718,7 @@ window.addEventListener('DOMContentLoaded', () => {
   numpad = document.getElementById('numpad');
 
   // Asignar Event Listeners
-  tabs.forEach(b=>b.addEventListener('click',()=>{
+  tabs.forEach(b=>b.addEventListener('click',()=>{ 
     currentTab=b.dataset.tab;
     render(); 
   }));
@@ -743,11 +745,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if(!choice) return;
 
         if(choice.toUpperCase()==='R'){
-          mutateState(()=>{ STATE = migratedIncoming; });
+          mutateState(()=> STATE = migratedIncoming);
           toast('Estado reemplazado.', 'success');
         } else if(choice.toUpperCase()==='M'){
           const merged = mergeState(STATE, migratedIncoming);
-          mutateState(()=>{ STATE = merged; });
+          mutateState(()=> STATE = merged);
           toast('Estados fusionados.', 'success');
         } else {
           toast('Opción cancelada.');
