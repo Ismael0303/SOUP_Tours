@@ -306,7 +306,7 @@ function openSettings() {
         <li><button value="run_tests">Correr Tests</button></li>
         <li><button value="run_hotfix_tests">Correr Tests de Hotfix</button></li>
       </ul>
-    </form>");
+    </form>);
   modal.addEventListener('close', () => {
     if (modal.returnValue === 'pin') {
       const newPin = prompt('Ingresá un nuevo PIN de 4 dígitos');
