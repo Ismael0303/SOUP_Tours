@@ -289,8 +289,9 @@ function openSettings() {
         <li><button value="pin">${hasPin ? 'Cambiar' : 'Crear'} PIN</button></li>
         ${hasPin ? '<li><button value="remove_pin">Quitar PIN</button></li>' : ''}
         <li><button value="run_tests">Correr Tests</button></li>
+        <li><button value="run_hotfix_tests">Correr Tests de Hotfix</button></li>
       </ul>
-    </form>`);
+    </form>");
   modal.addEventListener('close', () => {
     if (modal.returnValue === 'pin') {
       const newPin = prompt('Ingresá un nuevo PIN de 4 dígitos');
@@ -305,6 +306,8 @@ function openSettings() {
       toast('PIN eliminado.', 'success');
     } else if (modal.returnValue === 'run_tests') {
       runTests();
+    } else if (modal.returnValue === 'run_hotfix_tests') {
+      runHotfixTests();
     }
   }, { once: true });
 }
