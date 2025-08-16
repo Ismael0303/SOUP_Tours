@@ -89,16 +89,31 @@ function save(){ localStorage.setItem(KEY, JSON.stringify(STATE)); }
 function snapshot(){ LASTS.push(JSON.stringify(STATE)); if (LASTS.length>3) LASTS.shift(); }
 
 function load(){
-  if (DEBUG) console.log('load');
+  if (DEBUG) console.log('load: starting');
   try {
-    let loadedState = JSON.parse(localStorage.getItem(KEY));
-    if (!loadedState) loadedState = DEFAULT_STATE;
-    return migrate(loadedState);
+    const rawState = localStorage.getItem(KEY);
+    if (DEBUG) console.log('load: raw state from localStorage', rawState);
+
+    let loadedState = JSON.parse(rawState);
+    if (DEBUG) console.log('load: parsed state', loadedState);
+
+    if (!loadedState) {
+      if (DEBUG) console.log('load: no state found, using default');
+      loadedState = DEFAULT_STATE;
+    }
+
+    if (DEBUG) console.log('load: migrating state');
+    const migratedState = migrate(loadedState);
+    if (DEBUG) console.log('load: migration complete', migratedState);
+
+    return migratedState;
   }
   catch(e) {
     console.error('[SOUP] Error loading state:', e);
-    alert('Ocurrió un error al cargar los datos. Se reiniciará la aplicación.');
-    return migrate(DEFAULT_STATE); // Ensure DEFAULT_STATE is also migrated
+    alert('Ocurrió un error al cargar los datos. Se reiniciará la aplicación con datos limpios.');
+    // Si todo falla, empezar de cero
+    localStorage.removeItem(KEY);
+    return migrate(DEFAULT_STATE);
   }
 }
 
