@@ -246,7 +246,21 @@ function useTemplate(tid){
 }
 
 // ====== Helpers UI ======
-function open(html){ if (DEBUG) console.log('open'); modal.innerHTML = html; modal.showModal(); }
+function open(html){ 
+  if (DEBUG) console.log('open'); 
+  modal.innerHTML = html; 
+  modal.showModal(); 
+
+  // Enfocar el primer campo interactivo al abrir
+  document.querySelector('#modal input, #modal select, #modal textarea, #modal button')?.focus({preventScroll:true});
+
+  // Cerrar con ESC sin perder estado
+  document.getElementById('modal').addEventListener('cancel', (e)=>{ e.preventDefault(); modal.close('cancel'); }, { once:true });
+
+  // Evitar scroll del body cuando el modal está abierto
+  document.body.style.overflow = 'hidden';
+  modal.addEventListener('close', ()=>{ document.body.style.overflow = ''; }, { once:true });
+}
 function close(){ if (DEBUG) console.log('close'); modal.close(); }
 function input(name, attrs='') { return `<div class="field"><label>${name}<input ${attrs}></label></div>` }
 function toast(msg, level='error') {
@@ -403,7 +417,7 @@ function openMoveForm(id){
       <div class="field"><label>Tags (usa #)
         <input id="f-tags" placeholder="#peaje #ruta" value="${(move?.tags || []).join(' ')}" />
       </label></div>
-      <div class="row" style="gap:.5rem">
+      <div class="row-2">
         <div class="field" style="flex:1"><label>Moneda
           <input id="f-cur" value="${move?.currency || 'ARS'}" maxlength="3" />
         </label></div>
@@ -726,6 +740,35 @@ window.addEventListener('DOMContentLoaded', () => {
   };
   btnUndo.onclick = undo;
   btnSettings.onclick = openSettings;
+
+  const btnMore = document.getElementById('btn-more');
+  if (btnMore) {
+    btnMore.onclick = () => {
+      open(`<form method="dialog" class="card">
+        <h3>Acciones</h3>
+        <ul class="menu">
+          <li><button value="csv">Exportar CSV (Movimientos)</button></li>
+          <li><button value="liq">Exportar CSV (Liquidación)</button></li>
+          <li><button value="backup">Exportar Backup JSON</button></li>
+          <li><button value="tests">Correr Tests</button></li>
+        </ul>
+        <menu><button class="btn" value="cancel">Cerrar</button></menu>
+      </form>`);
+      modal.addEventListener('close', () => {
+        if (modal.returnValue === 'csv') exportCSV?.();
+        else if (modal.returnValue === 'liq') liquidationCSV?.();
+        else if (modal.returnValue === 'backup') {
+          const blob = new Blob([JSON.stringify(STATE,null,2)], {type:'application/json'});
+          const a = Object.assign(document.createElement('a'), {
+            href: URL.createObjectURL(blob),
+            download: `soup_tours_${new Date().toISOString().slice(0,10)}.json`
+          });
+          a.click(); URL.revokeObjectURL(a.href);
+          toast('Backup exportado.', 'success');
+        } else if (modal.returnValue === 'tests') runTests?.();
+      }, { once:true });
+    };
+  }
 
   // Renderizado Inicial
   render();

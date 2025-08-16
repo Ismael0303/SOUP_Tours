@@ -29,12 +29,10 @@
   <h1 id="band-name">SOUP Tours</h1>
   <div id="clock" class="clock"></div>
   <input id="q" placeholder="Buscar…" oninput="setSearch(this.value)" />
-  <button id="btn-csv" class="ghost" onclick="exportCSV()">CSV</button>
   <button id="btn-undo" class="ghost" onclick="undo()">Deshacer</button>
-  <button id="btn-exp-liq" class="ghost" onclick="liquidationCSV()">Liquidación</button>
-  <button id="btn-export" class="ghost">Exportar</button>
   <label class="ghost file">Importar <input id="input-import" type="file" accept="application/json" hidden></label>
   <button id="btn-settings" class="ghost" onclick="openSettings()">⚙️</button>
+  <button id="btn-more" class="ghost" aria-label="Más">⋯</button>
 </header>
 
   <main id="view"></main>

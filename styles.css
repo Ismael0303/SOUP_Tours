@@ -57,3 +57,103 @@ input.invalid{border-color:red}
 .amount-lg { font-size: 1.2em; font-weight: bold; }
 .move-ingreso { color: var(--acc); } /* Green */
 .move-gasto { color: #dc3545; } /* Red */
+
+@media (min-width: 720px) {
+  .topbar { flex-wrap: nowrap; }
+  .clock { flex-basis: auto; order: 0; margin-bottom: 0; }
+}
+
+/* === SOUP Tours · Hotfix UI móvil (v1) === */
+
+/* Topbar más flexible */
+.topbar { gap: .5rem; row-gap: .4rem; padding: .6rem .8rem; }
+.topbar h1 { font-size: 1.25rem; margin: 0; }
+
+/* Buscador ancho completo */
+.topbar input#q, #search-input { max-width: 100%; flex: 1 1 100%; min-width: 0; }
+
+/* Ocultar acciones secundarias en pantallas angostas */
+@media (max-width: 480px) {
+  #btn-csv, #btn-exp-liq, #btn-export, .topbar .file { display: none; }
+}
+
+/* Tabs inferiores más visibles */
+.tabs { height: 56px; }
+.tabs>button { font-weight: 500; opacity: .7; }
+.tabs>button.active { opacity: 1; border-top: 2px solid var(--acc); background: linear-gradient(to top, rgba(74,222,128,.10), transparent); }
+
+/* FAB con margen de safe area */
+.fab { bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+
+/* Toast más arriba */
+#toast { bottom: calc(8rem + env(safe-area-inset-bottom, 0px)); }
+
+/* Ajustes tipográficos */
+@media (max-width: 380px) { body { font-size: 15px; } .amount-lg { font-size: 1.1em; } }
+
+/* === Modales · Hotfix UI (v1) === */
+
+/* Card base del modal */
+#modal::backdrop { background: rgba(0,0,0,.55); }
+#modal .card {
+  background: var(--card);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  max-width: min(640px, 92vw);
+  max-height: min(84vh, 820px);
+  overflow: auto;
+}
+
+/* Tipografía y contraste */
+#modal h3 { margin: .25rem 0 1rem; font-size: 1.2rem; }
+#modal label { color: #d7d7d7; } /* subir contraste */
+#modal .muted { color: var(--muted); }
+
+/* Campos de formulario dentro del modal */
+#modal .field input,
+#modal .field select,
+#modal .field textarea {
+  width: 100%;
+  background: #1c1e23;
+  border: 1px solid #3a3d45;
+  color: var(--fg);
+  padding: .6rem .7rem;
+  border-radius: .6rem;
+}
+
+/* Estado focus más discreto y consistente */
+#modal .field input:focus,
+#modal .field select:focus,
+#modal .field textarea:focus {
+  outline: 2px solid #5eead4; /* ya usado en :focus global */
+  outline-offset: 1px;
+  border-color: #4c9;
+}
+
+/* Fila dos columnas pareja (p.ej. Moneda vs FX) */
+#modal .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+@media (max-width: 420px) { #modal .row-2 { grid-template-columns: 1fr; } }
+
+/* Chips de presets más compactos */
+#modal .chip-bar { gap: .5rem; margin: .5rem 0 1rem; }
+#modal .chip { background:#24272e; border:1px solid #3a3d45; }
+
+/* Botonera del modal */
+#modal menu { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem; }
+#modal .btn { padding: .55rem .9rem; }
+#modal .btn.primary { background: var(--acc); color: #051; font-weight: 700; }
+#modal .btn.alt { background: #2b2f36; color: #cfd3da; }
+
+/* Listas de menú en modales (Ajustes, ⋮) */
+#modal .menu { display: grid; gap: .25rem; }
+#modal .menu button {
+  width: 100%; text-align: left; padding: .6rem .7rem; border-radius: .5rem;
+  background: #1c1e23; border: 1px solid #30323a; color: var(--fg);
+}
+#modal .menu button:hover { background:#22262d; }
+
+/* Evitar que el modal quede oculto tras el teclado móvil */
+@supports (height: 100dvh) {
+  #modal .card { max-height: min(84dvh, 820px); }
+}
