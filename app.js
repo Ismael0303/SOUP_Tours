@@ -4,14 +4,24 @@ let DEBUG = true;
 
 // ====== Estado y persistencia ======
 const KEY = 'soup_tours';
+const CURRENT_VERSION = 2;
+
 const DEFAULT_STATE = {
-  band: { name: 'SOUP', members: [{id:'u1', name:'Ismael', role:'voz/guitarra'}], pin: null },
+  band: { name: 'SOUP', members: [{id:'u1', name:'Ismael', role:'voz/guitarra'}]},
   shows: [],
-  moves: []
+  moves: [],
+  templates: [],
+  quickActions: [
+    {label:'+ Venta merch $5000', kind:'ingreso', scope:'comun', amount:5000, category:'Merch', note:'Venta mesa'},
+    {label:'+ Nafta $10000', kind:'gasto', scope:'comun', amount:10000, category:'Transporte', note:'Combustible'},
+    {label:'+ Peaje $1500', kind:'gasto', scope:'comun', amount:1500, category:'Peajes', note:'Peaje'}
+  ],
+  version: CURRENT_VERSION,
+  createdAt: nowIso(),
+  updatedAt: nowIso()
 };
 let STATE = load();
 let LASTS = [];
-const CURRENT_VERSION = 2;
 let currentTab = 'home';
 let cashFilter = 'all';
 let enteredPin = '';
@@ -28,7 +38,7 @@ function getDeviceId(){
 const DEVICE_ID = getDeviceId();
 
 function nowIso(){ return new Date().toISOString(); }
-function stampNew(base){ 
+function stampNew(base){
   return { 
     ...base, 
     createdAt: base.createdAt || nowIso(), 
@@ -45,12 +55,35 @@ function markDeleted(obj){
 }
 
 // ====== Selectores de DOM (globales para que las funciones puedan usarlos) ======
-let view, tabs, modal, fab, btnExport, btnImport, btnUndo, btnExportCsv, btnSettings, searchInput, bandNameEl, pinScreen, pinDots, numpad;
+let view, tabs, modal, fab, btnImport, btnUndo, btnSettings, searchInput, bandNameEl, pinScreen, pinDots, numpad;
 
 // ====== Funciones de Utilidad ======
 const uid = (prefix = '') => prefix + Math.random().toString(36).slice(2,9);
 const strHash = s => s.split('').reduce((a,b)=>(a<<5)-a+b.charCodeAt(0),0);
-const memberName = id => (STATE.band.members.find(m=>m.id===id)||{}).name || '—';
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename});
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function memberName(id){
+  const mm = alive(STATE.band?.members || []).find(x => x.id === id);
+  return mm ? mm.name : '';
+}
 
 function setSearch(q){ UI.search=(q||'').toLowerCase(); render(); }
 
@@ -136,19 +169,33 @@ function undo() {
 
 // ====== Lógica de Negocio (Cálculos) ======
 function balances(){
-  if (DEBUG) console.log('balances');
-  const sum = (f)=>STATE.moves.filter(f).reduce((a,m)=>a+m.amount*(m.kind==='ingreso'?1:-1),0);
-  const comun = sum(m=>m.scope==='comun');
-  const per = {}; STATE.band.members.forEach(mm=>{
-    per[mm.id] = sum(m=>m.scope==='personal' && m.memberId===mm.id);
-  });
+  const moves = alive(STATE.moves || []);
+  const sum = (cond) => moves
+    .filter(cond)
+    .reduce((a, m) => a + (m.kind === 'ingreso' ? m.amount : -m.amount), 0);
+
+  const comun = sum(m => m.scope === 'comun');
+
+  const per = {};
+  for (const mm of alive(STATE.band?.members || [])) {
+    per[mm.id] = sum(m => m.scope === 'personal' && m.memberId === mm.id);
+  }
+
   return { comun, per };
 }
 
-function getShowBalance(showId) {
-  if (DEBUG) console.log('getShowBalance', { showId });
-  const showMoves = STATE.moves.filter(m => m.showId === showId);
-  return showMoves.reduce((acc, move) => acc + (move.amount * (move.kind === 'ingreso' ? 1 : -1)), 0);
+function getShowBalance(showId){
+  const moves = alive(STATE.moves || []).filter(m => m.showId === showId);
+  const sum = (cond) => moves
+    .filter(cond)
+    .reduce((a, m) => a + (m.kind === 'ingreso' ? m.amount : -m.amount), 0);
+
+  const comun = sum(m => m.scope === 'comun');
+  const per = {};
+  for (const mm of alive(STATE.band?.members || [])) {
+    per[mm.id] = sum(m => m.scope === 'personal' && m.memberId === mm.id);
+  }
+  return { comun, per };
 }
 
 function amountBase(m){ return m.amount * (m.kind==='ingreso'?1:-1) * (m.fx_rate||1); }
@@ -177,23 +224,36 @@ function mergeArrays(localArr, incomingArr){
 }
 
 function mergeState(local, incoming){
-  // NO toques campos sensibles como PIN si no querés
-  const band = {
-    ...local.band,
-    name: newer({updatedAt: local.updatedAt}, {updatedAt: incoming.updatedAt}) === local ? local.band.name : (incoming.band?.name || local.band.name),
-    pin: local.band.pin // mantené el PIN local
+  const newerObj = (a, b) => {
+    const au = a?.updatedAt || a?.band?.updatedAt || a?.createdAt || '';
+    const bu = b?.updatedAt || b?.band?.updatedAt || b?.createdAt || '';
+    return au >= bu ? a : b;
   };
+
+  const mergedBand = {
+    ...(local.band || {}),
+    ...(incoming.band || {}),
+  };
+
+  // name según el objeto más nuevo que tenga nombre
+  const bandNewer = newerObj(local.band || local, incoming.band || incoming);
+  if (bandNewer?.band?.name || bandNewer?.name){
+    mergedBand.name = (bandNewer.band?.name) ?? bandNewer.name;
+  }
 
   return {
     band: {
-      ...band,
-      members: mergeArrays(local.band.members||[], incoming.band?.members||[])
+      ...mergedBand,
+      members: mergeArrays(local.band?.members || [], incoming.band?.members || [])
     },
-    shows: mergeArrays(local.shows||[], incoming.shows||[]),
-    moves: mergeArrays(local.moves||[], incoming.moves||[]),
-    // marcas de sincronización (opcionales)
-    lastMergedAt: nowIso(),
-    updatedAt: nowIso()
+    shows: mergeArrays(local.shows || [], incoming.shows || []),
+    moves: mergeArrays(local.moves || [], incoming.moves || []),
+    templates: mergeArrays(local.templates || [], incoming.templates || []),
+    quickActions: mergeArrays(local.quickActions || [], incoming.quickActions || []),
+    version: Math.max(local.version || 1, incoming.version || 1, CURRENT_VERSION || 1),
+    createdAt: (local.createdAt && incoming.createdAt) ? (local.createdAt <= incoming.createdAt ? local.createdAt : incoming.createdAt) : (local.createdAt || incoming.createdAt || nowIso()),
+    updatedAt: nowIso(),
+    lastMergedAt: nowIso()
   };
 }
 
@@ -232,16 +292,33 @@ function closeShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; i
 function reopenShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Reabrir show?')) return; mutateState(()=>{ s.closedAt = null; }); }
 function isClosed(s){ return !!s.closedAt; }
 
-function addMove(kind, scope, amount, note, memberId, showId, extra={}){
-  if(showId){ const s=STATE.shows.find(x=>x.id===showId); if(s && isClosed(s)) return toast('Show cerrado. Reabrí para cargar.'); }
-  if(scope==='personal' && !memberId) return toast('Elegí integrante');
-  const base = {id:uid(), ts:Date.now(), kind, scope, memberId, amount:Number(amount), note, showId};
-  const withExtra = Object.assign(base, {
-    category: 'General', tags: [], currency: 'ARS', fx_rate: 1, receiptDataUrl: null
-  }, extra);
-  mutateState(() => STATE.moves.unshift(withExtra));
+function addMove(data){
+  const move = stampNew({
+    id: crypto.randomUUID(),
+    kind: data.kind,
+    amount: Number(data.amount || 0),
+    scope: data.scope || 'comun',
+    memberId: data.memberId || null,
+    showId: data.showId || null,
+    date: data.date || new Date().toISOString().slice(0,10),
+    note: data.note || ''
+  });
+
+  mutateState(() => {
+    STATE.moves = [...(STATE.moves||[]), move];
+  });
 }
-function updateMove(id, data){ if (DEBUG) console.log('updateMove', { id, data }); mutateState(() => { const index = STATE.moves.findIndex(m=>m.id===id); if(index!==-1) STATE.moves[index] = {...STATE.moves[index], ...data}; }); }
+
+function updateMove(id, patch){
+  const i = (STATE.moves||[]).findIndex(m => m.id === id);
+  if (i < 0) return;
+  mutateState(() => {
+    STATE.moves[i] = stampUpdate(STATE.moves[i], {
+      ...patch,
+      amount: patch.amount != null ? Number(patch.amount) : STATE.moves[i].amount
+    });
+  });
+}
 
 function addTemplate(t){ t.id = uid(); STATE.templates.push(t); save(); render(); }
 function useTemplate(tid){
@@ -277,7 +354,7 @@ function open(html){
   modal.addEventListener('close', ()=>{ document.body.style.overflow = ''; }, { once:true });
 }
 function close(){ if (DEBUG) console.log('close'); modal.close(); }
-function input(name, attrs='') { return `<div class="field"><label>${name}<input ${attrs}></label></div>` }
+function input(name, attrs='') { return `<div class="field"><label>${esc(name)}<input ${attrs}></label></div>` }
 function toast(msg, level='error') {
   if (DEBUG) console.log('toast', { msg, level });
   const el = document.getElementById('toast');
@@ -301,8 +378,8 @@ function openSettings() {
   open(`<form method="dialog" class="card">
       <h3>Ajustes</h3>
       <ul class="menu">
-        <li><button value="pin">${hasPin ? 'Cambiar' : 'Crear'} PIN</button></li>
-        ${hasPin ? '<li><button value="remove_pin">Quitar PIN</button></li>' : ''}
+        <li><button value="pin">${esc(hasPin ? 'Cambiar' : 'Crear')} PIN</button></li>
+        ${hasPin ? `<li><button value="remove_pin">Quitar PIN</button></li>` : ''}
         <li><button value="run_tests">Correr Tests</button></li>
         <li><button value="run_hotfix_tests">Correr Tests de Hotfix</button></li>
       </ul>
@@ -386,12 +463,12 @@ function openShowForm(id, duplicate = false) {
   const show = id ? STATE.shows.find(s => s.id === id) : {};
   const title = id ? (duplicate ? 'Duplicar show' : 'Editar show') : 'Nuevo show';
   open(`<form method="dialog" class="card">
-      <h3>${title}</h3>
+      <h3>${esc(title)}</h3>
       ${input('Fecha',`id="f-date" type="date" required value="${show?.date || dayjs().format('YYYY-MM-DD')}"`)}
-      ${input('Ciudad',`id="f-city" required value="${show?.city || ''}"`)}
-      ${input('Venue',`id="f-venue" value="${show?.venue || ''}"`)}
+      ${input('Ciudad',`id="f-city" required value="${esc(show?.city || '')}"`)}
+      ${input('Venue',`id="f-venue" value="${esc(show?.venue || '')}"`)}
       ${input('Cache',`id="f-cache" type="number" inputmode="numeric" min="0" value="${show?.cache || 0}"`)}
-      <div class="field"><label>Requerimientos (Rider)<textarea id="f-rider">${show?.requerimientos || ''}</textarea></label></div>
+      <div class="field"><label>Requerimientos (Rider)<textarea id="f-rider">${esc(show?.requerimientos || '')}</textarea></label></div>
       <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
     </form>`);
   modal.addEventListener('close',()=> {
@@ -416,8 +493,8 @@ function openShowForm(id, duplicate = false) {
 function openMoveForm(id){
   if (DEBUG) console.log('openMoveForm', { id });
   const move = id ? STATE.moves.find(m => m.id === id) : {};
-  const memberOpts = STATE.band.members.map(m=>`<option value="${m.id}" ${move?.memberId === m.id ? 'selected' : ''}>${m.name}</option>`).join('');
-  const showOpts = ['<option value="">(ninguno)</option>'].concat(STATE.shows.map(s=>`<option value="${s.id}" ${move?.showId === s.id ? 'selected' : ''}>${s.date} ${s.city}</option>`)).join('');
+  const memberOpts = alive(STATE.band?.members || []).map(m=>`<option value="${m.id}" ${move?.memberId === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
+  const showOpts = ['<option value="">(ninguno)</option>'].concat(alive(STATE.shows).map(s=>`<option value="${s.id}" ${move?.showId === s.id ? 'selected' : ''}>${s.date} ${s.city}</option>`)).join('');
   open(`<form method="dialog" class="card">
       <h3>${id ? 'Editar' : 'Nuevo'} movimiento</h3>
       <div class="field"><label>Tipo<select id="f-kind"><option value="ingreso" ${move?.kind === 'ingreso' ? 'selected' : ''}>Ingreso</option><option value="gasto" ${move?.kind === 'gasto' ? 'selected' : ''}>Gasto</option></select></label></div>
@@ -443,7 +520,7 @@ function openMoveForm(id){
           <input id="f-fx" type="number" step="0.0001" value="${move?.fx_rate || 1}" />
         </label></div>
       </div>
-      ${input('Nota',`id="f-note" value="${move?.note || ''}"`)}
+      ${input('Nota',`id="f-note" value="${esc(move?.note || '')}"`)}
       <div class="field"><label>Show<select id="f-show">${showOpts}</select></label></div>
       <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
     </form>`);
@@ -460,16 +537,21 @@ function openMoveForm(id){
     const scope = document.getElementById('f-scope').value;
     const memberId = scope==='personal' ? document.getElementById('f-member').value : null;
     if (scope === 'personal' && !memberId) return toast('Elegí un integrante para el movimiento personal.');
-    const data = { kind: document.getElementById('f-kind').value, scope, amount, note: document.getElementById('f-note').value, memberId, showId: document.getElementById('f-show').value || null };
-    const category = document.getElementById('f-cat').value || 'General';
-    const tags = (document.getElementById('f-tags').value||'')
-                  .split(/\s+/).filter(Boolean).map(t=>t.startsWith('#')?t:`#${t}`);
-    const currency = (document.getElementById('f-cur').value||'ARS').toUpperCase();
-    const fx_rate = Number(document.getElementById('f-fx').value||1);
-    const extra = {category, tags, currency, fx_rate};
+    const data = { 
+      kind: document.getElementById('f-kind').value, 
+      scope, 
+      amount, 
+      note: document.getElementById('f-note').value, 
+      memberId, 
+      showId: document.getElementById('f-show').value || null,
+      category: document.getElementById('f-cat').value || 'General',
+      tags: (document.getElementById('f-tags').value||'').split(/\s+/).filter(Boolean).map(t=>t.startsWith('#')?t:`#${t}`),
+      currency: (document.getElementById('f-cur').value||'ARS').toUpperCase(),
+      fx_rate: Number(document.getElementById('f-fx').value||1)
+    };
 
-    if (id) updateMove(id, { ...data, ...extra });
-    else addMove(data.kind, data.scope, data.amount, data.note, data.memberId, data.showId, extra);
+    if (id) updateMove(id, data);
+    else addMove(data);
   }, {once:true});
 }
 
@@ -493,25 +575,25 @@ function renderHome(){
   if (DEBUG) console.log('renderHome');
   const {comun, per} = balances();
   const quick = (STATE.quickActions||[]).slice(0,3).map(q=>
-    `<button class="btn" onclick="quickAction('${q.label}')">${q.label}</button>`
+    `<button class="btn" onclick="quickAction('${q.label}')">${esc(q.label)}</button>`
   ).join(' ');
-  const chips = STATE.band.members.map(m=>`<span class="badge">${m.name}: ${(per[m.id]||0).toLocaleString()}</span>`).join(' ');
+  const chips = alive(STATE.band.members).map(m=>`<span class="badge">${esc(m.name)}: ${(per[m.id]||0).toLocaleString()}</span>`).join(' ');
   const upcoming = alive(STATE.shows)
     .filter(s => matchesSearch(s.city) || matchesSearch(s.venue))
     .sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5)
-    .map(s=>`<div class="row"><div>${dayjs(s.date).format('DD/MM/YY')} • ${s.city} • ${s.venue||''}</div><span class="badge ${s.state}">${s.state}</span></div>`).join('');
+    .map(s=>`<div class="row"><div>${dayjs(s.date).format('DD/MM/YY')} • ${esc(s.city)} • ${esc(s.venue||'')}</div><span class="badge ${s.state}">${esc(s.state)}</span></div>`).join('');
   view.innerHTML = `
     <section class="card">${quick}</section>
     <section class="card"><div class="row"><div>Fondo Común</div><div class="amount">${comun.toLocaleString()}</div></div><div>${chips}</div></section>
     <section class="card"><h3>Próximos shows</h3><div class="list">${upcoming||'<em>Sin shows</em>'}</div></section>
     <section class="card"><h3>Miembros</h3>
-      <div class="list">${alive(STATE.band.members).map(m=>`<div class="row"><div>${m.name} • ${m.role||''}</div><button class="ghost" onclick="removeMember('${m.id}')">Quitar</button></div>`).join('')}</div>
+      <div class="list">${alive(STATE.band.members).map(m=>`<div class="row"><div>${esc(m.name)} • ${esc(m.role||'')}</div><button class="ghost" onclick="removeMember('${m.id}')">Quitar</button></div>`).join('')}</div>
       <button class="btn" onclick="openMemberForm()">+ Integrante</button>
     </section>`;
 }
 function quickAction(label){
   const q = STATE.quickActions.find(x=>x.label===label); if(!q) return;
-  addMove(q.kind, q.scope, q.amount, q.note||'', null, null, q);
+  addMove(q);
 }
 
 function renderShows(){
@@ -521,10 +603,10 @@ function renderShows(){
     .sort((a,b) => dayjs(a.date).isBefore(dayjs(b.date)) ? -1 : 1);
   const rows = shows.map(s=>`
     <div class="card">
-      <div class="row"><div><strong>${dayjs(s.date).format('DD/MM/YY')}</strong> • ${s.city} • ${s.venue||''}</div><div class="row"><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${s.state}</span><button class="menu-btn" onclick="openMenu('show', '${s.id}')">⋮</button></div></div>
+      <div class="row"><div><strong>${dayjs(s.date).format('DD/MM/YY')}</strong> • ${esc(s.city)} • ${esc(s.venue||'')}</div><div class="row"><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${esc(s.state)}</span><button class="menu-btn" onclick="openMenu('show', '${s.id}')">⋮</button></div></div>
       <div class="row">
         <div>Cache: ${(s.cache||0).toLocaleString()}</div>
-        <div>Movs: ${getShowBalance(s.id).toLocaleString()}</div>
+        <div>Movs: ${getShowBalance(s.id).comun.toLocaleString()}</div>
         <div class="row" style="gap:.5rem">
           <button class="ghost" onclick="setState('${s.id}','confirmado')">Confirmar</button>
           <button class="ghost" onclick="setState('${s.id}','realizado')">Realizado</button>
@@ -540,7 +622,7 @@ function renderShows(){
 function renderCash(){
   if (DEBUG) console.log('renderCash');
   const getFilterClass = f => f === cashFilter ? 'chip active' : 'chip';
-  const memberChips = STATE.band.members.map(m => `<button class="${getFilterClass(m.id)}" onclick="setCashFilter('${m.id}')">${m.name}</button>`).join('');
+  const memberChips = alive(STATE.band.members).map(m => `<button class="${getFilterClass(m.id)}" onclick="setCashFilter('${m.id}')">${esc(m.name)}</button>`).join('');
   const chips = `<div class="chip-bar">
       <button class="${getFilterClass('all')}" onclick="setCashFilter('all')">Todos</button>
       <button class="${getFilterClass('comun')}" onclick="setCashFilter('comun')">Común</button>
@@ -581,8 +663,8 @@ function renderCash(){
           <small class="muted">${new Date(m.ts).toLocaleDateString('es-ES', {year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}</small>
         </div>
         <div>
-          ${m.scope}${m.memberId?` (${memberName(m.memberId)})`:''} • ${m.note||''}
-          <small class="muted">${m.showId?STATE.shows.find(s=>s.id===m.showId)?.city:''}</small>
+          ${esc(m.scope)}${m.memberId?` (${esc(memberName(m.memberId))})`:''} • ${esc(m.note||'')}<br>
+          <small class="muted">${m.showId?esc(STATE.shows.find(s=>s.id===m.showId)?.city):''}</small>
         </div>
         <button class="menu-btn" onclick="openMenu('move', '${m.id}')">⋮</button>
       </div>
@@ -629,49 +711,49 @@ function checkPin() {
 }
 
 function exportCSV(){
-  try {
-    const header = 'fecha_iso,tipo,scope,integrante,monto,moneda,fx,nota,categoria,tags,show';
-    const rows = STATE.moves.map(m=>{
-      const iso = new Date(m.ts||Date.now()).toISOString();
-      const name = m.memberId ? memberName(m.memberId) : '';
-      const nota = (m.note||'').replace(/"/g,'""');
-      return `${iso},${m.kind},${m.scope},${name},${m.amount},${m.currency||'ARS'},${m.fx_rate||1},"${nota}","${m.category||'General'}","${(m.tags||[]).join(' ')}",${m.showId||''}`;
-    });
-    const blob = new Blob([ ['﻿', header, ...rows].join('
-') ], {type:'text/csv;charset=utf-8'});
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `soup_tours_moves.csv`});
-    a.click(); URL.revokeObjectURL(a.href);
-    toast('CSV exportado.', 'success'); // Add toast for success
-  } catch(e) {
-    console.error('[SOUP] Error exporting CSV:', e);
-    alert('Ocurrió un error al exportar el CSV. Revisá la consola.');
+  const membersById = Object.fromEntries(alive(STATE.band?.members || []).map(m => [m.id, m]));
+  const rows = [
+    ['fecha', 'tipo', 'monto', 'scope', 'miembro', 'show', 'nota']
+  ];
+
+  for (const m of alive(STATE.moves || [])){
+    rows.push([
+      m.date || '',
+      m.kind || '',
+      String(m.amount ?? ''),
+      m.scope || '',
+      membersById[m.memberId]?.name || '',
+      (STATE.shows?.find(s => s.id === m.showId)?.name) || '',
+      (m.note ? m.note.replaceAll('\n',' ').trim() : '')
+    ]);
   }
+
+  const csv = rows.map(r => r.map(x => '"' + String(x ?? '').replaceAll('"','""') + '"').join(',')).join('\n');
+  downloadText('soup_tours_export.csv', csv);
 }
 
 function liquidationCSV(){
-  try {
-    const members = STATE.band.members;
-    const comunes = STATE.moves.filter(m=>m.scope==='comun');
-    const personales = STATE.moves.filter(m=>m.scope==='personal');
-    const sum = arr => arr.reduce((a,m)=> a + (m.kind==='ingreso'? m.amount : -m.amount)*(m.fx_rate||1), 0);
-    const totalGastoComun = sum(comunes.filter(m=>m.kind==='gasto'));
-    const prorrateo = totalGastoComun / Math.max(1, members.length);
-    const rows = [['integrante','aportes_personales','gastos_personales','parte_gastos_comunes','saldo_final']];
-    members.forEach(mem=>{
-      const ap = sum(personales.filter(m=>m.memberId===mem.id && m.kind==='ingreso'));
-      const ga = sum(personales.filter(m=>m.memberId===mem.id && m.kind==='gasto'));
-      const saldo = ap - ga - prorrateo;
-      rows.push([mem.name, ap, ga, prorrateo, saldo]);
-    });
-    const csv = rows.map(r=>r.join(',')).join('
-');
-    const a = Object.assign(document.createElement('a'), {href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})), download:'liquidacion.csv'});
-    a.click(); URL.revokeObjectURL(a.href);
-    toast('Liquidación exportada.', 'success'); // Add toast for success
-  } catch(e) {
-    console.error('[SOUP] Error exporting liquidation CSV:', e);
-    alert('Ocurrió un error al exportar la liquidación. Revisá la consola.');
+  const members = alive(STATE.band?.members || []);
+  const memberIds = members.map(m => m.id);
+
+  const comunes = alive(STATE.moves || []).filter(m => m.scope === 'comun');
+  const personales = alive(STATE.moves || []).filter(m => m.scope === 'personal');
+
+  const rows = [['miembro','saldo_personal','cuota_comun','saldo_total']];
+
+  const totalComun = comunes.reduce((a,m)=> a + (m.kind==='ingreso'? m.amount : -m.amount), 0);
+  const cuotaComun = members.length ? totalComun / members.length : 0;
+
+  for (const mm of members){
+    const saldoPersonal = personales
+      .filter(m => m.memberId === mm.id)
+      .reduce((a,m)=> a + (m.kind==='ingreso'? m.amount : -m.amount), 0);
+    const saldoTotal = saldoPersonal + cuotaComun; // ajustar si tu convención resta/añade distinto
+    rows.push([mm.name, String(saldoPersonal), String(cuotaComun), String(saldoTotal)]);
   }
+
+  const csv = rows.map(r => r.map(x => '"' + String(x ?? '').replaceAll('"','""') + '"').join(',')).join('\n');
+  downloadText('soup_tours_liquidacion.csv', csv);
 }
 
 function isValidState(obj){
@@ -685,7 +767,7 @@ function runTests(){
   try{
     DEBUG=true; console.group('[TEST]');
     const before = STATE.moves.length;
-    addMove('ingreso','comun',1000,'test',null,null,{category:'Merch',currency:'ARS',fx_rate:1});
+    addMove({kind:'ingreso',scope:'comun',amount:1000,note:'test',category:'Merch',currency:'ARS',fx_rate:1});
     assertEq(STATE.moves.length, before+1, 'addMove should push');
     const id = STATE.moves[0].id; updateMove ? updateMove(id,{amount:2000}) : 0;
     assertEq(STATE.moves[0].amount, 2000, 'updateMove should patch');
@@ -706,11 +788,8 @@ window.addEventListener('DOMContentLoaded', () => {
   tabs = document.querySelectorAll('.tabs>button');
   modal = document.getElementById('modal');
   fab = document.getElementById('fab');
-  btnExport = document.getElementById('btn-export');
   btnImport = document.getElementById('input-import');
   btnUndo = document.getElementById('btn-undo');
-  btnCsv = document.getElementById('btn-csv');
-  btnExpLiq = document.getElementById('btn-exp-liq');
   btnSettings = document.getElementById('btn-settings');
   bandNameEl = document.getElementById('band-name');
   pinScreen = document.getElementById('pin-screen');
@@ -724,11 +803,6 @@ window.addEventListener('DOMContentLoaded', () => {
   }));
   fab.onclick = ()=>{
     if(currentTab==='shows') openShowForm(); else openMoveForm(); 
-  };
-  btnExport.onclick = ()=>{
-    const blob = new Blob([JSON.stringify(STATE,null,2)], {type:'application/json'});
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `soup_tours_${new Date().toISOString().slice(0,10)}.json`});
-    a.click(); URL.revokeObjectURL(a.href);
   };
   btnImport.onchange = (e)=>{
     const file = e.target.files[0]; if(!file) return;
@@ -745,11 +819,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if(!choice) return;
 
         if(choice.toUpperCase()==='R'){
-          mutateState(()=> STATE = migratedIncoming);
+          mutateState(()=>{ STATE = migratedIncoming; });
           toast('Estado reemplazado.', 'success');
         } else if(choice.toUpperCase()==='M'){
           const merged = mergeState(STATE, migratedIncoming);
-          mutateState(()=> STATE = merged);
+          mutateState(()=>{ STATE = merged; });
           toast('Estados fusionados.', 'success');
         } else {
           toast('Opción cancelada.');

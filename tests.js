@@ -50,8 +50,8 @@ function runTests() {
       // Test addMove
       const moveData1 = { kind: 'ingreso', scope: 'comun', amount: 500, note: 'tickets', showId: showId };
       const moveData2 = { kind: 'gasto', scope: 'personal', amount: 50, note: 'beers', memberId: testMemberId, showId: showId };
-      addMove(moveData1.kind, moveData1.scope, moveData1.amount, moveData1.note, null, moveData1.showId);
-      addMove(moveData2.kind, moveData2.scope, moveData2.amount, moveData2.note, moveData2.memberId, moveData2.showId);
+      addMove(moveData1);
+      addMove(moveData2);
       assert(window.alive(STATE.moves).length === 2, 'addMove should increase move count');
       assert(STATE.moves[0].amount === 50, 'addMove should add moves to the beginning of the array');
 
@@ -62,7 +62,8 @@ function runTests() {
 
       // Test getShowBalance
       const showBal = getShowBalance(showId);
-      assert(showBal === 450, 'getShowBalance should calculate show-specific balance');
+      assert(showBal.comun === 500, 'getShowBalance should calculate show-specific common balance');
+      assert(showBal.per[testMemberId] === -50, 'getShowBalance should calculate show-specific personal balance');
 
       // Test updateShow
       updateShow(showId, { city: 'New Testville' });
@@ -82,8 +83,8 @@ function runTests() {
       // 1) Crear dos movimientos locales
       const m1 = { kind:'ingreso', scope:'comun', amount:1000, note:'Mesa' };
       const m2 = { kind:'gasto', scope:'personal', memberId: STATE.band.members[0]?.id, amount:300, note:'Bebidas' };
-      addMove(m1.kind, m1.scope, m1.amount, m1.note, null, null); // Use addMove with individual params
-      addMove(m2.kind, m2.scope, m2.amount, m2.note, m2.memberId, null); // Use addMove with individual params
+      addMove(m1);
+      addMove(m2);
 
       // 2) Simular otro dispositivo exportando su JSON
       const other = JSON.parse(JSON.stringify(STATE));
@@ -164,6 +165,9 @@ function runTests() {
 
     console.log('%cAll tests passed successfully!', 'color: lightgreen; font-size: 1.2em;');
 
+    // Run refactor tests
+    runRefactorTests();
+
   } catch (e) {
     console.error('A test failed, stopping execution.', e);
   } finally {
@@ -173,4 +177,46 @@ function runTests() {
     render();
     console.log('Tests finished. Original state restored.');
   }
+}
+
+function _fakeState(){
+  const A = { id: 'A', name: 'Ana', deletedAt: null };
+  const B = { id: 'B', name: 'Beto', deletedAt: nowIso() }; // borrado
+  const S1 = { id: 'S1', name: 'Cordoba 10/10', deletedAt: null };
+  return {
+    band: { name: 'SOUP', members: [A, B] },
+    shows: [S1],
+    moves: [
+      stampNew({ id: 'm1', kind: 'ingreso', amount: 1000, scope: 'comun', showId: 'S1' }),
+      stampNew({ id: 'm2', kind: 'egreso', amount: 200, scope: 'personal', memberId: 'A' }),
+      { id: 'm3', kind: 'ingreso', amount: 9999, scope: 'personal', memberId: 'B', deletedAt: nowIso(), createdAt: nowIso(), updatedAt: nowIso() }
+    ],
+    version: CURRENT_VERSION,
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+}
+
+function test_balances_alive(){
+  const st = _fakeState();
+  const prev = STATE; STATE = st;
+  const b = balances();
+  STATE = prev;
+  assertEq(b.comun, 1000, 'Comun sólo cuenta vivos');
+  assertEq(b.per['A'], -200, 'Personal A cuenta');
+  assertEq(b.per['B'] ?? 0, 0, 'Personal B borrado no suma');
+}
+
+function test_merge_includes_templates(){
+  const a = { band:{members:[]}, shows:[], moves:[], templates:[{id:'t1', updatedAt:'2024-01-01'}], version:1, updatedAt:'2024-01-01' };
+  const b = { band:{members:[]}, shows:[], moves:[], templates:[{id:'t2', updatedAt:'2024-02-01'}], version:2, updatedAt:'2024-02-01' };
+  const m = mergeState(a,b);
+  const ids = new Set((m.templates||[]).map(x=>x.id));
+  assert(ids.has('t1') && ids.has('t2'), 'mergeState conserva templates de ambos');
+}
+
+function runRefactorTests(){
+  test_balances_alive();
+  test_merge_includes_templates();
+  console.log('Refactor tests OK');
 }
