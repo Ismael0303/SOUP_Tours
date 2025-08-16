@@ -51,9 +51,10 @@ input.invalid{border-color:red}
 :focus{outline:2px solid #5eead4;outline-offset:2px}
 
 /* === Modales === */
+#modal { border: none; padding: 0; background: transparent; }
 #modal::backdrop { background: rgba(0,0,0,.55); }
-#modal .card { background: var(--card); border-radius: 1rem; padding: 1.25rem; box-shadow: 0 20px 60px rgba(0,0,0,.5); max-width: min(640px, 92vw); max-height: min(84vh, 820px); overflow: auto; }
-#modal h3 { margin: .25rem 0 1rem; font-size: 1.2rem; }
+#modal .card { background: var(--card); border-radius: 1rem; padding: 1.25rem; box-shadow: 0 20px 60px rgba(0,0,0,.5); max-width: min(640px, 92vw); max-height: min(84dvh, 820px); overflow-y: auto; }
+#modal h3 { margin: .25rem 0 1rem; font-size: 1.2rem; color: var(--fg); }
 #modal label { color: #d7d7d7; }
 #modal .muted { color: var(--muted); }
 #modal .field input, #modal .field select, #modal .field textarea { width: 100%; background: #1c1e23; border: 1px solid #3a3d45; color: var(--fg); padding: .6rem .7rem; border-radius: .6rem; }
@@ -68,6 +69,12 @@ input.invalid{border-color:red}
 #modal .menu { display: grid; gap: .25rem; }
 #modal .menu button { width: 100%; text-align: left; padding: .6rem .7rem; border-radius: .5rem; background: #1c1e23; border: 1px solid #30323a; color: var(--fg); }
 #modal .menu button:hover { background:#22262d; }
+
+/* === Card Layouts === */
+.show-card-grid, .move-card-grid { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 1rem; align-items: center; }
+.show-card-grid p, .move-card-grid p { margin: 0; }
+.show-card-actions, .move-card-actions { grid-column: 2; grid-row: 1 / -1; display: flex; align-items: center; justify-content: center; }
+.move-card-details { grid-column: 1; }
 
 /* === Toast & PIN Screen === */
 #toast{position:fixed;left:50%;transform:translateX(-50%);background:red;color:white;padding:.8rem 1.2rem;border-radius:.5rem;z-index:99;opacity:0;transition:opacity .3s; bottom: calc(8rem + env(safe-area-inset-bottom, 0px));}

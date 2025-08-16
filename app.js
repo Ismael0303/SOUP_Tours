@@ -7,7 +7,7 @@ const KEY = 'soup_tours';
 const CURRENT_VERSION = 2;
 
 const DEFAULT_STATE = {
-  band: { name: 'SOUP', members: [{id:'u1', name:'Ismael', role:'voz/guitarra'}]},
+  band: { name: 'SOUP', members: [{id:'u1', name:'Ismael', role:'voz/guitarra'}]}, 
   shows: [],
   moves: [],
   templates: [],
@@ -421,6 +421,38 @@ function openMenu(type, id) {
   }, { once: true });
 }
 
+function openShowActions(showId) {
+  const s = STATE.shows.find(s => s.id === showId);
+  if (!s) return;
+  open(`<form method="dialog" class="card">
+      <h3>Acciones del Show</h3>
+      <ul class="menu">
+        <li><button value="edit">Editar</button></li>
+        <li><button value="duplicate">Duplicar</button></li>
+        <li><button value="delete">Eliminar</button></li>
+        <hr>
+        <li><button value="confirmado">Confirmar</button></li>
+        <li><button value="realizado">Realizado</button></li>
+        <li><button value="cancelado">Cancelar</button></li>
+        <hr>
+        <li><button value="close" ${isClosed(s)?'disabled':''}>Cerrar</button></li>
+        <li><button value="reopen" ${!isClosed(s)?'disabled':''}>Reabrir</button></li>
+      </ul>
+      <menu><button type="button" class="btn" value="cancel" onclick="modal.close()">Cerrar</button></menu>
+    </form>`);
+  modal.addEventListener('close', () => {
+    const action = modal.returnValue;
+    if (action === 'edit') openShowForm(showId);
+    else if (action === 'duplicate') openShowForm(showId, true);
+    else if (action === 'delete') deleteItem('show', showId);
+    else if (action === 'confirmado') setState(showId, 'confirmado');
+    else if (action === 'realizado') setState(showId, 'realizado');
+    else if (action === 'cancelado') cancelShow(showId);
+    else if (action === 'close') closeShow(showId);
+    else if (action === 'reopen') reopenShow(showId);
+  }, { once: true });
+}
+
 function deleteItem(type, id) {
   if (DEBUG) console.log('deleteItem', { type, id });
   if (!confirm('¿Estás seguro de que querés eliminar esto?')) return;
@@ -448,7 +480,7 @@ function openMemberForm() {
       <h3>Nuevo integrante</h3>
       ${input('Nombre','id="f-name" required')}
       ${input('Rol','id="f-role"')}
-      <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
+      <menu><button value="cancel" formnovalidate>Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
     </form>`);
   modal.addEventListener('close',()=>{ 
     if(modal.returnValue !== 'default') return;
@@ -469,7 +501,7 @@ function openShowForm(id, duplicate = false) {
       ${input('Venue',`id="f-venue" value="${esc(show?.venue || '')}"`)}
       ${input('Cache',`id="f-cache" type="number" inputmode="numeric" min="0" value="${show?.cache || 0}"`)}
       <div class="field"><label>Requerimientos (Rider)<textarea id="f-rider">${esc(show?.requerimientos || '')}</textarea></label></div>
-      <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
+      <menu><button value="cancel" formnovalidate>Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
     </form>`);
   modal.addEventListener('close',()=> {
     if(modal.returnValue !== 'default') return;
@@ -522,7 +554,7 @@ function openMoveForm(id){
       </div>
       ${input('Nota',`id="f-note" value="${esc(move?.note || '')}"`)}
       <div class="field"><label>Show<select id="f-show">${showOpts}</select></label></div>
-      <menu><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
+      <menu><button class="btn" value="cancel" formnovalidate>Cancelar</button><button class="btn primary" value="default">Guardar</button></menu>
     </form>`);
   const scopeSel = document.getElementById('f-scope');
   const wrap = document.getElementById('f-member-wrap');
@@ -603,16 +635,14 @@ function renderShows(){
     .sort((a,b) => dayjs(a.date).isBefore(dayjs(b.date)) ? -1 : 1);
   const rows = shows.map(s=>`
     <div class="card">
-      <div class="row"><div><strong>${dayjs(s.date).format('DD/MM/YY')}</strong> • ${esc(s.city)} • ${esc(s.venue||'')}</div><div class="row"><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${esc(s.state)}</span><button class="menu-btn" onclick="openMenu('show', '${s.id}')">⋮</button></div></div>
-      <div class="row">
-        <div>Cache: ${(s.cache||0).toLocaleString()}</div>
-        <div>Movs: ${getShowBalance(s.id).comun.toLocaleString()}</div>
-        <div class="row" style="gap:.5rem">
-          <button class="ghost" onclick="setState('${s.id}','confirmado')">Confirmar</button>
-          <button class="ghost" onclick="setState('${s.id}','realizado')">Realizado</button>
-          <button class="ghost" onclick="cancelShow('${s.id}')">Cancelar</button>
-          <button class="ghost" onclick="closeShow('${s.id}')" ${isClosed(s)?'disabled':''}>Cerrar</button>
-          <button class="ghost" onclick="reopenShow('${s.id}')" ${!isClosed(s)?'disabled':''}>Reabrir</button>
+      <div class="show-card-grid">
+        <p><strong>${dayjs(s.date).format('DD/MM/YY')}</strong></p>
+        <p>${esc(s.city)} - ${esc(s.venue||'')}</p>
+        <p>Cache: ${(s.cache||0).toLocaleString()}</p>
+        <p>Balance: ${getShowBalance(s.id).comun.toLocaleString()}</p>
+        <p><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${esc(s.state)}</span></p>
+        <div class="show-card-actions">
+          <button class="menu-btn" onclick="openShowActions('${s.id}')">Acciones</button>
         </div>
       </div>
     </div>`).join('');
@@ -657,16 +687,14 @@ function renderCash(){
     </div>`;
   const rows = filteredMoves.map(m => `
     <div class="card move-${m.kind}">
-      <div class="row">
-        <div>
-          <span class="amount-lg">${m.kind==='ingreso'?'+':'-'} ${m.amount.toLocaleString()} ${m.currency}</span><br>
-          <small class="muted">${new Date(m.ts).toLocaleDateString('es-ES', {year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}</small>
+      <div class="move-card-grid">
+        <div class="move-card-amount"><span class="amount-lg">${m.kind==='ingreso'?'+':'-'} ${m.amount.toLocaleString()} ${m.currency}</span></div>
+        <div class="move-card-date"><small class="muted">${new Date(m.ts).toLocaleDateString('es-ES', {year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'})}</small></div>
+        <div class="move-card-details">
+          <p>${esc(m.scope)}${m.memberId?` (${esc(memberName(m.memberId))})`:''} • ${esc(m.note||'')}</p>
+          <p><small class="muted">${m.showId?esc(STATE.shows.find(s=>s.id===m.showId)?.city):''}</small></p>
         </div>
-        <div>
-          ${esc(m.scope)}${m.memberId?` (${esc(memberName(m.memberId))})`:''} • ${esc(m.note||'')}<br>
-          <small class="muted">${m.showId?esc(STATE.shows.find(s=>s.id===m.showId)?.city):''}</small>
-        </div>
-        <button class="menu-btn" onclick="openMenu('move', '${m.id}')">⋮</button>
+        <div class="move-card-actions"><button class="menu-btn" onclick="openMenu('move', '${m.id}')">⋮</button></div>
       </div>
     </div>
   `).join('');
@@ -844,6 +872,7 @@ window.addEventListener('DOMContentLoaded', () => {
           <li><button value="csv">Exportar CSV (Movimientos)</button></li>
           <li><button value="liq">Exportar CSV (Liquidación)</button></li>
           <li><button value="backup">Exportar Backup JSON</button></li>
+          <li><button value="import">Importar Backup</button></li>
           <li><button value="tests">Correr Tests</button></li>
         </ul>
         <menu><button class="btn" value="cancel">Cerrar</button></menu>
@@ -859,6 +888,8 @@ window.addEventListener('DOMContentLoaded', () => {
           });
           a.click(); URL.revokeObjectURL(a.href);
           toast('Backup exportado.', 'success');
+        } else if (modal.returnValue === 'import') {
+          btnImport.click();
         } else if (modal.returnValue === 'tests') runTests?.();
       }, { once:true });
     };
