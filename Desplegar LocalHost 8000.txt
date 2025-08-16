@@ -1,0 +1,12 @@
+Desplegar Service Workers
+============================================================
+cd C:\Users\Ismael\Desktop\SOUP Tours
+python -m http.server
+
+ip movil
+http://192.168.0.6:8000
+
+cd "C:\Users\Ismael\Desktop\SOUP Tours"
+gemini
+
+https://github.com/Ismael0303/SOUP_Tours
