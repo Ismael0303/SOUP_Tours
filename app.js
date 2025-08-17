@@ -12,9 +12,9 @@ const DEFAULT_STATE = {
   moves: [],
   templates: [],
   quickActions: [
-    {label:'+ Venta merch $5000', kind:'ingreso', scope:'comun', amount:5000, category:'Merch', note:'Venta mesa'},
-    {label:'+ Nafta $10000', kind:'gasto', scope:'comun', amount:10000, category:'Transporte', note:'Combustible'},
-    {label:'+ Peaje $1500', kind:'gasto', scope:'comun', amount:1500, category:'Peajes', note:'Peaje'}
+    {id: 'qa1', label:'+ Venta merch', amount: 5000, kind:'ingreso', scope:'comun', category:'Merch', note:'Venta mesa'},
+    {id: 'qa2', label:'+ Nafta', amount: -10000, kind:'gasto', scope:'comun', category:'Transporte', note:'Combustible'},
+    {id: 'qa3', label:'+ Peaje', amount: -1500, kind:'gasto', scope:'comun', category:'Peajes', note:'Peaje'}
   ],
   version: CURRENT_VERSION,
   createdAt: nowIso(),
@@ -55,7 +55,7 @@ function markDeleted(obj){
 }
 
 // ====== Selectores de DOM (globales para que las funciones puedan usarlos) ======
-let view, tabs, modal, fab, btnImport, btnUndo, btnSettings, searchInput, bandNameEl, pinScreen, pinDots, numpad;
+let view, tabs, modal, fab, btnImport, btnUndo, btnSettings, searchInput, appTitleEl, pinScreen, pinDots, numpad;
 
 // ====== Funciones de Utilidad ======
 const uid = (prefix = '') => prefix + Math.random().toString(36).slice(2,9);
@@ -107,9 +107,9 @@ function migrate(state){
     });
     state.templates ||= [];
     state.quickActions ||= [
-      {label:'+ Venta merch $5000', kind:'ingreso', scope:'comun', amount:5000, category:'Merch', note:'Venta mesa'},
-      {label:'+ Nafta $10000', kind:'gasto', scope:'comun', amount:10000, category:'Transporte', note:'Combustible'},
-      {label:'+ Peaje $1500', kind:'gasto', scope:'comun', amount:1500, category:'Peajes', note:'Peaje'}
+      {id: 'qa1', label:'+ Venta merch', amount: 5000, kind:'ingreso', scope:'comun', category:'Merch', note:'Venta mesa'},
+      {id: 'qa2', label:'+ Nafta', amount: -10000, kind:'gasto', scope:'comun', category:'Transporte', note:'Combustible'},
+      {id: 'qa3', label:'+ Peaje', amount: -1500, kind:'gasto', scope:'comun', category:'Peajes', note:'Peaje'}
     ];
     state.shows.forEach(s=>{ s.closedAt ||= null; s.requerimientos ||= ''; });
     state.version = 2;
@@ -167,7 +167,7 @@ function undo() {
   toast('Deshecho.', 'success');
 }
 
-// ====== Lógica de Negocio (Cálculos) ======
+// ====== Lógica de Negocio (Cálculos) ====== 
 function balances(){
   const moves = alive(STATE.moves || []);
   const sum = (cond) => moves
@@ -205,7 +205,7 @@ function totalsByCategory(list){
   return map; // {Categoria: netoBase}
 }
 
-// ====== Merge engine ======
+// ====== Merge engine ====== 
 function byId(arr){ return new Map(arr.map(x=>[x.id, x])); }
 function newer(a, b){
   // devuelve el más nuevo por updatedAt (ISO); si empatan, preferí el local (a)
@@ -260,7 +260,7 @@ function mergeState(local, incoming){
 function alive(arr) { return arr.filter(x=>!x.deletedAt); }
 window.alive = alive;
 
-// ====== Acciones ======
+// ====== Acciones ====== 
 function removeMember(id){
   const i = STATE.band.members.findIndex(m=>m.id===id);
   if(i===-1) return;
@@ -282,14 +282,14 @@ function cancelShow(id){
   const s = STATE.shows.find(s=>s.id===id);
   if (!s) return;
   if (s.state === 'realizado') return toast('No se puede cancelar un show realizado.');
-  if (!confirm('¿Estás seguro de que quieres cancelar este show?')) return; // Added confirmation
+  if (!confirm('¿Estás seguro de que quieres cancelar este show?')) return;
   const motivo = prompt('Motivo de cancelación');
   if(!motivo) return;
   mutateState(()=>{ s.state='cancelado'; s.cancelReason=motivo; });
 }
 
-function closeShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Cerrar show?')) return; mutateState(()=>{ s.closedAt = Date.now(); }); }
-function reopenShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Reabrir show?')) return; mutateState(()=>{ s.closedAt = null; }); }
+function closeShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Cerrar show?')) return; mutateState(()=>{ s.closedAt = Date.now(); }); } 
+function reopenShow(id){ const s=STATE.shows.find(x=>x.id===id); if(!s) return; if(!confirm('Reabrir show?')) return; mutateState(()=>{ s.closedAt = null; }); } 
 function isClosed(s){ return !!s.closedAt; }
 
 function addMove(data){
@@ -320,24 +320,7 @@ function updateMove(id, patch){
   });
 }
 
-function addTemplate(t){ t.id = uid(); STATE.templates.push(t); save(); render(); }
-function useTemplate(tid){
-  const t = STATE.templates.find(x=>x.id===tid); if(!t) return;
-  openMoveForm();
-  // precarga campos
-  setTimeout(()=>{
-    document.getElementById('f-kind').value = t.kind;
-    document.getElementById('f-scope').value = t.scope; document.getElementById('f-scope').onchange();
-    document.getElementById('f-amount').value = t.amount;
-    document.getElementById('f-note').value = t.note||'';
-    document.getElementById('f-cat').value = t.category||'General';
-    document.getElementById('f-tags').value = (t.tags||[]).join(' ');
-    document.getElementById('f-cur').value = t.currency||'ARS';
-    document.getElementById('f-fx').value = t.fx_rate||1;
-  },0);
-}
-
-// ====== Helpers UI ======
+// ====== Helpers UI ====== 
 function open(html){ 
   if (DEBUG) console.log('open'); 
   modal.innerHTML = html; 
@@ -371,7 +354,7 @@ snapshot = (function(orig){ return function(){ if(DEBUG) log('snapshot(before)',
 
 const _save = save; save = function(){ if(DEBUG) log('save', STATE); _save(); };
 
-// ====== Formularios y Menús ======
+// ====== Formularios y Menús ====== 
 function openSettings() {
   if (DEBUG) console.log('openSettings');
   const hasPin = !!STATE.band.pin;
@@ -582,7 +565,7 @@ function openMoveForm(id){
       fx_rate: Number(document.getElementById('f-fx').value||1)
     };
 
-    if (id) updateMove(id, data);
+    if (id) updateMove(id, data); 
     else addMove(data);
   }, {once:true});
 }
@@ -593,63 +576,94 @@ function setCashFilter(filter) {
   render();
 }
 
-// ====== Renderizado ======
+// ====== Renderizado ====== 
+const isDesktop = () => window.matchMedia('(min-width: 1200px)').matches;
+
 function render(){
   if (DEBUG) console.log('render', { currentTab, cashFilter, search: UI.search });
-  bandNameEl.textContent = STATE.band.name || 'SOUP Tours';
-  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentTab));
-  if(currentTab==='home') return renderHome();
-  if(currentTab==='shows') return renderShows();
-  renderCash();
+  appTitleEl.textContent = 'SOUP Tours';
+  
+  if (isDesktop()) {
+    view.classList.add('desk-grid');
+    renderDesktop();
+  } else {
+    view.classList.remove('desk-grid');
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentTab));
+    if(currentTab==='home') view.innerHTML = buildHomeHTML();
+    if(currentTab==='shows') view.innerHTML = buildShowsHTML();
+    if(currentTab==='cash') view.innerHTML = buildCashHTML();
+  }
 }
 
-function renderHome(){
+function renderDesktop(){
+  view.innerHTML = `
+    <div class="phone-frame">
+      <div class="panel-header">Inicio</div>
+      <div class="phone-scroll">${buildHomeHTML()}</div>
+    </div>
+    <div class="phone-frame">
+      <div class="panel-header">Shows</div>
+      <div class="phone-scroll">${buildShowsHTML()}</div>
+    </div>
+    <div class="phone-frame">
+      <div class="panel-header">Caja</div>
+      <div class="phone-scroll">${buildCashHTML()}</div>
+    </div>
+  `;
+}
+
+function buildHomeHTML(){
   if (DEBUG) console.log('renderHome');
   const {comun, per} = balances();
-  const quick = (STATE.quickActions||[]).slice(0,3).map(q=>
-    `<button class="btn" onclick="quickAction('${q.label}')">${esc(q.label)}</button>`
-  ).join(' ');
-  const chips = alive(STATE.band.members).map(m=>`<span class="badge">${esc(m.name)}: ${(per[m.id]||0).toLocaleString()}</span>`).join(' ');
-  const upcoming = alive(STATE.shows)
-    .filter(s => matchesSearch(s.city) || matchesSearch(s.venue))
-    .sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5)
-    .map(s=>`<div class="row"><div>${dayjs(s.date).format('DD/MM/YY')} • ${esc(s.city)} • ${esc(s.venue||'')}</div><span class="badge ${s.state}">${esc(s.state)}</span></div>`).join('');
-  view.innerHTML = `
-    <section class="card">${quick}</section>
-    <section class="card"><div class="row"><div>Fondo Común</div><div class="amount">${comun.toLocaleString()}</div></div><div>${chips}</div></section>
-    <section class="card"><h3>Próximos shows</h3><div class="list">${upcoming||'<em>Sin shows</em>'}</div></section>
+  const quickActionsHTML = (STATE.quickActions||[]).map(q=> 
+    `<button class="btn quick-action" onclick="quickAction('${q.id}')">${esc(q.label)}</button>`
+  ).join('');
+  const fundsHTML = alive(STATE.band.members).map(m=>`<div class="fund-row"><span>${esc(m.name)}</span><span class="amount">${(per[m.id]||0).toLocaleString()}</span></div>`).join('');
+  
+  return `
+    <section class="card">
+      <div class="row"><h2 class="band-name">${esc(STATE.band.name)}</h2><button class="ghost" onclick="openBandNameForm()">Editar</button></div>
+    </section>
+    <section class="card">
+      <div class="row"><h3>Acciones Rápidas</h3><button class="ghost" onclick="openQuickActionsForm()">⚙️</button></div>
+      <div class="quick-actions-list">${quickActionsHTML}</div>
+    </section>
+    <section class="card">
+      <h3>Fondos</h3>
+      <div class="funds-list">
+        <div class="fund-row"><strong>Fondo Común</strong><strong class="amount">${comun.toLocaleString()}</strong></div>
+        ${fundsHTML}
+      </div>
+    </section>
     <section class="card"><h3>Miembros</h3>
       <div class="list">${alive(STATE.band.members).map(m=>`<div class="row"><div>${esc(m.name)} • ${esc(m.role||'')}</div><button class="ghost" onclick="removeMember('${m.id}')">Quitar</button></div>`).join('')}</div>
       <button class="btn" onclick="openMemberForm()">+ Integrante</button>
     </section>`;
 }
-function quickAction(label){
-  const q = STATE.quickActions.find(x=>x.label===label); if(!q) return;
-  addMove(q);
-}
 
-function renderShows(){
+function buildShowsHTML(){
   if (DEBUG) console.log('renderShows');
-  const shows = alive(STATE.shows)
+  const shows = alive(STATE.shows) 
     .filter(s => matchesSearch(s.city) || matchesSearch(s.venue))
     .sort((a,b) => dayjs(a.date).isBefore(dayjs(b.date)) ? -1 : 1);
   const rows = shows.map(s=>`
     <div class="card">
       <div class="show-card-grid">
-        <p><strong>${dayjs(s.date).format('DD/MM/YY')}</strong></p>
-        <p>${esc(s.city)} - ${esc(s.venue||'')}</p>
-        <p>Cache: ${(s.cache||0).toLocaleString()}</p>
-        <p>Balance: ${getShowBalance(s.id).comun.toLocaleString()}</p>
-        <p><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${esc(s.state)}</span></p>
+        <div class="show-card-date">${dayjs(s.date).format('DD/MM/YY')}</div>
+        <div class="show-card-city"><strong>${esc(s.city)}</strong></div>
+        <div class="show-card-venue">${esc(s.venue||'')}</div>
+        <div class="show-card-state"><span class="badge ${s.state} ${isClosed(s)?'closed':''}">${esc(s.state)}</span></div>
+        <div class="show-card-cache">Cache: ${(s.cache||0).toLocaleString()}</div>
+        <div class="show-card-balance">Balance: ${getShowBalance(s.id).comun.toLocaleString()}</div>
         <div class="show-card-actions">
           <button class="menu-btn" onclick="openShowActions('${s.id}')">Acciones</button>
         </div>
       </div>
     </div>`).join('');
-  view.innerHTML = `<button class="btn" onclick="openShowForm()">+ Show</button>${rows || '<p class="card">Sin shows</p>'}`;
+  return `<button class="btn" onclick="openShowForm()">+ Show</button>${rows || '<p class="card">Sin shows</p>'}`;
 }
 
-function renderCash(){
+function buildCashHTML(){
   if (DEBUG) console.log('renderCash');
   const getFilterClass = f => f === cashFilter ? 'chip active' : 'chip';
   const memberChips = alive(STATE.band.members).map(m => `<button class="${getFilterClass(m.id)}" onclick="setCashFilter('${m.id}')">${esc(m.name)}</button>`).join('');
@@ -698,10 +712,10 @@ function renderCash(){
       </div>
     </div>
   `).join('');
-  view.innerHTML = `<button class="btn" onclick="openMoveForm()">+ Movimiento</button>${chips}${totals}<div class="card list">${rows||'<em>Sin movimientos para este filtro</em>'}</div>`;
+  return `<button class="btn" onclick="openMoveForm()">+ Movimiento</button>${chips}${totals}<div class="card list">${rows||'<em>Sin movimientos para este filtro</em>'}</div>`;
 }
 
-// ====== Clock ======
+// ====== Clock ====== 
 let clockInterval;
 function updateClock() {
   const clockEl = document.getElementById('clock');
@@ -709,7 +723,7 @@ function updateClock() {
   clockEl.textContent = new Date().toLocaleTimeString('es-ES', {hour: '2-digit', minute:'2-digit', second:'2-digit'});
 }
 
-// ====== Lógica de PIN ======
+// ====== Lógica de PIN ====== 
 function numpadClick(val) {
   if (DEBUG) console.log('numpadClick', { val });
   if (val === 'del') enteredPin = enteredPin.slice(0, -1);
@@ -807,7 +821,7 @@ function runTests(){
   }
 }
 
-// ====== Inicialización ======
+// ====== Inicialización ====== 
 window.addEventListener('DOMContentLoaded', () => {
   if (DEBUG) console.log('DOMContentLoaded');
 
@@ -819,7 +833,7 @@ window.addEventListener('DOMContentLoaded', () => {
   btnImport = document.getElementById('input-import');
   btnUndo = document.getElementById('btn-undo');
   btnSettings = document.getElementById('btn-settings');
-  bandNameEl = document.getElementById('band-name');
+  appTitleEl = document.getElementById('app-title');
   pinScreen = document.getElementById('pin-screen');
   pinDots = document.getElementById('pin-dots');
   numpad = document.getElementById('numpad');
@@ -829,7 +843,7 @@ window.addEventListener('DOMContentLoaded', () => {
     currentTab=b.dataset.tab;
     render(); 
   }));
-  fab.onclick = ()=>{
+  fab.onclick = ()=>{ 
     if(currentTab==='shows') openShowForm(); else openMoveForm(); 
   };
   btnImport.onchange = (e)=>{
@@ -847,11 +861,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if(!choice) return;
 
         if(choice.toUpperCase()==='R'){
-          mutateState(()=>{ STATE = migratedIncoming; });
+          mutateState(()=> STATE = migratedIncoming);
           toast('Estado reemplazado.', 'success');
         } else if(choice.toUpperCase()==='M'){
           const merged = mergeState(STATE, migratedIncoming);
-          mutateState(()=>{ STATE = merged; });
+          mutateState(()=> STATE = merged);
           toast('Estados fusionados.', 'success');
         } else {
           toast('Opción cancelada.');

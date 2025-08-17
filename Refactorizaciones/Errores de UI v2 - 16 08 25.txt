@@ -1,0 +1,36 @@
+Elemento: Reloj
+
+<div id="clock" class="clock">19:44:47</div>
+
+Problemas:
+1. Debe ir en el mismo renglon que el titulo de la App (SOUP Tours)
+
+======
+
+Elemento: Nombre de App
+
+<h1 id="band-name">SOUP</h1>
+
+Problema:
+1. Esta nombrado como "band name", pero SOUP Tours (falta "Tours") es el nombre de la app, no de la banda. Además, debe ser mas grande
+2. El nombre de la banda debe ir justo arriba de las acciones rapidas, y debe tener una opcion para editarlo
+
+======
+
+Elemento: Acciones rapidas
+
+<section class="card"><button class="btn" onclick="quickAction('+ Venta merch $5000')">+ Venta merch $5000</button> <button class="btn" onclick="quickAction('+ Nafta $10000')">+ Nafta $10000</button> <button class="btn" onclick="quickAction('+ Peaje $1500')">+ Peaje $1500</button></section>
+
+Problemas:
+1. Se ven desordenados. Deja un boton de accion rapida por renglon, y deben ocupar el ancho de la pantalla en movil. En version desktop deben estar uno al lado del otro
+2. En este momento no son configurables. Añade un renglon con el titulo "acciones rapidas", con un boton opciones
+3. Las opciones dentro del modal deben ser CRUD. Los campos para configurar cada uno deben ser: accion y monto (positivo o negativo)
+
+======
+
+Elemento: Fondos quickview
+
+<section class="card"><div class="row"><div>Fondo Común</div><div class="amount">2.000</div></div><div><span class="badge">Gabriel: 10.000</span> <span class="badge">Luca: 0</span> <span class="badge">Ismael: 10.000</span> <span class="badge">Chuni: 10.000</span> <span class="badge">Sombra: 0</span></div></section>
+
+Problemas:
+1. Se ven desordenados. "Fondo comun" y cada fondo personal debe ser estar en un renglon propio. No deben ser botones, debe tener una estetica de lista/spreadsheet

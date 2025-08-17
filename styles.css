@@ -8,16 +8,16 @@
 .row{display:flex;justify-content:space-between;align-items:center;gap:.75rem}
 
 /* === Topbar === */
-.topbar{display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#0f1013;flex-wrap:wrap;gap:.5rem;row-gap:.4rem;padding:.6rem .8rem;}
-.topbar h1 { font-size: 1.25rem; margin: 0; }
-.topbar input#q { max-width: 100%; flex: 1 1 100%; min-width: 0; background:#0e0f12; border:1px solid #333; color:var(--fg); padding:.35rem .5rem; border-radius:.5rem }
-.clock { font-size: 0.9em; color: var(--muted); text-align: center; flex-basis: 100%; order: -1; margin-bottom: .5rem; }
+.topbar{display:grid; grid-template-columns: 1fr auto; align-items: center; gap: .5rem; position:sticky;top:0;background:#0f1013;padding:.6rem .8rem; z-index: 10;}
+.topbar h1#app-title { font-size: 1.5rem; margin: 0; grid-column: 1; }
+.topbar .clock { font-size: 0.9em; color: var(--muted); grid-column: 2; text-align: right;}
+.topbar input#q { grid-column: 1 / -1; width: 100%; background:#0e0f12; border:1px solid #333; color:var(--fg); padding:.35rem .5rem; border-radius:.5rem }
 
 /* === Navegación (Tabs y FAB) === */
-.tabs{position:fixed;bottom:0;left:0;right:0;background:#0f1013;display:flex;height: 56px;}
+.tabs{position:fixed;bottom:0;left:0;right:0;background:#0f1013;display:flex;height: 56px; z-index: 10;}
 .tabs>button{flex:1;padding:.8rem;border:none;background:transparent;color:var(--fg);font-weight: 500; opacity: .7;}
 .tabs>button.active{border-top:2px solid var(--acc);opacity: 1; background: linear-gradient(to top, rgba(74,222,128,.10), transparent);}
-.fab{position:fixed;right:1rem;background:var(--acc);color:#051; border:none;border-radius:999px;width:56px;height:56px;font-size:28px; bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.fab{position:fixed;right:1rem;background:var(--acc);color:#051; border:none;border-radius:999px;width:56px;height:56px;font-size:28px; bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); box-shadow: 0 8px 24px rgba(0,0,0,.35); z-index: 10;}
 
 /* === Componentes UI === */
 .ghost{background:transparent;border:1px solid #333;color:var(--fg);padding:.4rem .6rem;border-radius:.6rem}
@@ -39,6 +39,13 @@
 .totals > div{text-align:center}
 .totals .label{font-size:.8em;color:var(--muted)}
 .thumb{ width:48px; height:48px; object-fit:cover; border-radius:.5rem; border:1px solid #333 }
+
+/* === Home Screen === */
+.band-name { font-size: 1.5rem; font-weight: bold; }
+.quick-actions-list { display: grid; gap: 0.5rem; }
+.quick-actions-list .btn { width: 100%; text-align: center; }
+.funds-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.fund-row { display: flex; justify-content: space-between; padding: 0.75rem .5rem; background-color: #1f2128; border-radius: .5rem; }
 
 /* === Formularios === */
 input,select,button,textarea{font:inherit}
@@ -93,7 +100,7 @@ input.invalid{border-color:red}
 
 /* Ocultar acciones secundarias en pantallas angostas */
 @media (max-width: 480px) {
-  #btn-csv, #btn-exp-liq, #btn-export, .topbar .file { display: none; }
+  #btn-csv, #btn-exp-liq, .topbar .file { display: none; }
 }
 
 /* Ajustes tipográficos para móviles pequeños */
@@ -113,8 +120,43 @@ input.invalid{border-color:red}
 }
 
 /* Estilos para Desktop */
-@media (min-width: 720px) { 
+@media (min-width: 1200px) { 
   body{font-size:18px}
-  .topbar { flex-wrap: nowrap; }
-  .clock { flex-basis: auto; order: 0; margin-bottom: 0; }
+  .topbar { grid-template-columns: auto 1fr auto auto; gap: 1rem; flex-wrap: nowrap; }
+  .topbar h1#app-title { grid-column: 1; }
+  .topbar .clock { grid-column: 2; text-align: left; }
+  .topbar input#q { grid-column: 3; width: auto; }
+  .quick-actions-list { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+  #view.desk-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    padding: 1rem;
+    height: calc(100vh - 60px); /* Full height minus topbar */
+  }
+  .phone-frame {
+    background: #0f1013;
+    border: 1px solid #2a2d34;
+    border-radius: 16px;
+    box-shadow: 0 6px 30px rgba(0,0,0,.35);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-header {
+    padding: 0.75rem;
+    font-weight: bold;
+    text-align: center;
+    border-bottom: 1px solid #2a2d34;
+    background: var(--card);
+  }
+  .phone-scroll {
+    overflow-y: auto;
+    padding: 1rem;
+    flex-grow: 1;
+  }
+  .tabs, .fab {
+    display: none !important; /* Important to override other styles */
+  }
 }
